@@ -1,0 +1,5 @@
+# ADR 0003 — Central registry + per-agent sync adapters (MCP, Skills)
+**Status:** Accepted
+**Context:** Claude Code, Codex, Gemini CLI and OpenCode use different MCP config formats and skill directories, which change over time. Users already have hand-written config.
+**Decision:** Naurix owns a central registry (SQLite metadata; skill content in an app-managed directory; secrets in Keychain). Each agent gets a sync adapter with `detect`, `read_existing`, `plan` (dry-run diff), `apply`, `rollback`. Rules: never write without showing the plan and getting approval; touch only entries the app owns (tracked in a manifest); back up before write; never overwrite user-owned entries; skills are symlinked from the central store, not copied. Each adapter's format is verified against current official docs in a spike (M6) before implementation — no formats are assumed from memory. Adapters declare capabilities; unsupported combinations are shown as unsupported, not faked.
+**Consequences:** More upfront work per agent; all changes reversible; fixture tests per agent version.

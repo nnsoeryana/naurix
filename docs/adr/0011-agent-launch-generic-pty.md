@@ -1,0 +1,15 @@
+# ADR 0011 — Agent launch via the generic PTY adapter (M5)
+**Status:** Accepted
+
+**Decisions**
+1. **Presets** (Claude Code → `claude`, OpenAI Codex CLI → `codex`, Gemini CLI → `gemini`, OpenCode → `opencode`) are only an id, a display name and an executable name. **No default arguments are assumed**; per-agent flags, config files and structured integrations are verified one agent at a time in M6.
+2. **Capabilities:** only `pty_launch` is advertised, because it is the only one implemented and tested (PRD §7).
+3. **Status is process state only**: Starting / Running / Exited / Failed. "Running" is explicitly labelled "what the agent is doing is not reported". A unit test fails if status text ever contains words like waiting, approval, completed or working (PRD AG-009, AGENTS.md).
+4. **Finding executables:** a Finder-launched GUI app has a minimal `PATH`, so detection searches the process `PATH` first, then `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.bun/bin`, `~/.npm-global/bin`, `~/.cargo/bin`, `~/.volta/bin` and every `~/.nvm/versions/node/*/bin` (newest first). The same directories become the child's `PATH` so `#!/usr/bin/env node` CLIs work. We do **not** run the user's login shell to discover `PATH` (slow, executes user config) and we do **not** run `--version` (it would execute an unreviewed binary); version detection is deferred.
+5. **The webview never sends an executable.** `agent_launch` takes an agent id; Rust resolves program, args and environment. Executable overrides must be absolute executable files, chosen by the user (file dialog or typed).
+6. **Review rule (ADR 0007 §4) is enforced in the backend**, not the UI: custom agents and unapproved presets fail with `ReviewRequired` unless the launch is flagged `reviewed`. A preset is approved for the **exact resolved executable path**; changing the path override or editing a custom agent revokes approval. The review dialog shows the exact command (display-quoted only, never executed through a shell), working directory and extra environment.
+7. **Custom agents** store name, executable (bare command or absolute path), an argument array, and environment additions in the `settings` table. Because those values are unencrypted, secret-looking names (`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*AUTH*`…) and `DYLD_*`/`LD_*` are rejected; the UI says so. Real secret storage arrives with the Keychain work (M7, ADR 0004).
+8. **Agent panes:** an agent opens in its own tab; it never auto-closes on exit (so final output stays readable), shows "Launch again", and closing it while running asks for confirmation. Splitting from an agent pane creates a shell pane.
+9. Agent sessions are recorded in `sessions` with `kind = 'agent'` and `adapter_id` (metadata only) and listed separately in the sidebar.
+
+**Not done / limits:** no version detection; no notifications; "four concurrent agents" memory benchmark not yet run; Codex and Gemini launching is untested on real installs (not installed on the dev machine) — only the not-found path and a scripted mock agent were exercised.

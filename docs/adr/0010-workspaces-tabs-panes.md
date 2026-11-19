@@ -1,0 +1,12 @@
+# ADR 0010 — Workspaces, tabs, panes and persistence (M4)
+**Status:** Accepted
+
+**Decisions**
+1. **Frontend never supplies paths or programs for a terminal.** `terminal_spawn` takes a workspace id; Rust resolves the directory from SQLite and re-checks it exists (DATA-005). Workspace paths come only from the native folder dialog and are validated and canonicalized in Rust (absolute, existing directory, symlinks resolved, de-duplicated).
+2. **Layout is UI state, not persisted.** Tabs and split layout live in Zustand. SQLite stores workspaces, a metadata row per session (title, kind, lifecycle, timestamps) and settings. Because processes cannot survive an app restart, startup marks any `starting`/`running` session `interrupted` (verified, including after `kill -9`). No PID is persisted (the `process_id` column from the first draft of the schema was dropped).
+3. **Every terminal stays mounted.** Hidden tabs/workspaces use `display:none` so each xterm keeps its scrollback. Cost measured at ~2–3 MB per extra idle terminal (see PERFORMANCE doc). If a future benchmark shows this is too expensive, the fallback is detaching idle views, accepting loss of their scrollback.
+4. **Panes are rendered as a flat list keyed by pane id and positioned from layout geometry**, not as a nested React tree. A nested tree remounted the original terminal on every split and killed its shell (found by the end-to-end smoke test); a regression test (`survivedSplit`) now guards it.
+5. **Exit behavior:** a clean `exit` (code 0) closes the pane; a non-zero exit or signal keeps the pane with a Restart/Close bar so failures stay visible. Closing a pane/tab asks for confirmation only when a foreground job is detected in that terminal.
+6. **Custom native menu** without the default "Close Window" (⌘W) so ⌘W closes a pane. Shortcuts are defined once in `src/shortcuts.ts`, matched on physical key codes in the capture phase so xterm.js cannot swallow them. ⌘K opens the palette (as the PRD specifies), which means it no longer clears the screen as in some terminals.
+7. **Removing a workspace** stops its sessions and deletes only its database rows; project files are never touched.
+8. **Benchmark mode** (`NAURIX_BENCH_WORKSPACE`, `NAURIX_BENCH_TERMINALS`, `NAURIX_BENCH_COMMAND`) exists in all builds so release binaries can be measured; it only reads environment variables. The `NAURIX_SMOKE_*` end-to-end hook is debug-only.
