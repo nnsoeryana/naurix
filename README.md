@@ -134,6 +134,8 @@ Open the `.dmg` and drag **Naurix** into **Applications**. Notes:
 | ⇧⌘R | Rename tab (also: double-click the tab) |
 | ⇧⌘A | Launch an AI agent |
 
+**Attach files:** drag files from Finder / Explorer onto a pane and Naurix types their quoted paths at the cursor (no Enter, nothing is read or run; agents such as Claude Code turn an image path into an attachment). **Screenshots:** with an image on the clipboard, paste as usual (⌘V on macOS) and Naurix sends Ctrl+V to the program, which is how agent CLIs read a clipboard image. On Linux and Windows press **Ctrl+V** (not Ctrl+Shift+V, which pastes text). Plain-text paste is unchanged.
+
 **Right-click a terminal** for a menu: *Copy*, *Paste*, *Split Right / Left / Up / Down* and *Close Pane*. (⌘C / ⌘V on macOS, Ctrl+Shift+C / V on Linux and Windows; the menu's Paste reads the system clipboard only when you choose it, up to 1 MiB.)
 
 Shortcuts are defined in `src/shortcuts.ts`. Note that ⌘K opens the palette, so it does not clear the screen as in some terminals (use `clear` or Ctrl-L).
@@ -142,7 +144,12 @@ Shortcuts are defined in `src/shortcuts.ts`. Note that ⌘K opens the palette, s
 
 Prompts such as Powerlevel10k draw their icons (the Apple logo, folder icon, `` separators) with a **Nerd Font**. Naurix asks for these fonts automatically, in this order: *your chosen font*, then `MesloLGS NF`, `JetBrainsMono Nerd Font`, `FiraCode Nerd Font`, `CaskaydiaCove Nerd Font`, `Hack Nerd Font`, `Symbols Nerd Font Mono`, then Menlo. The browser falls back **per character**, so you can use a normal font such as *Dank Mono* for text and still get the icons from a Nerd Font.
 
-- Install one Nerd Font if prompts show empty boxes: `brew install --cask font-meslo-lg-nerd-font` (or the MesloLGS NF fonts from the p10k docs, which is what most p10k setups use).
+- Install one Nerd Font if prompts show empty boxes. Naurix does not bundle fonts, so this is needed once per computer:
+  - macOS: `brew install --cask font-meslo-lg-nerd-font`
+  - Linux: download *Meslo* from [nerdfonts.com/font-downloads](https://www.nerdfonts.com/font-downloads), unzip into `~/.local/share/fonts`, then run `fc-cache -fv`
+  - Windows: `winget install DEVCOM.JetBrainsMonoNerdFont`, or download a font from the same page, right-click the files and choose *Install*
+  - Restart Naurix afterwards. The MesloLGS NF fonts from the p10k docs also work.
+- The OS logo at the start of a Powerlevel10k prompt comes from your shell theme, not from Naurix: it shows the Apple logo on macOS, the distro logo on Linux and the Windows logo on Windows. To change it, edit `POWERLEVEL9K_OS_ICON_CONTENT_EXPANSION` in `~/.p10k.zsh`.
 - Pick your own font: **⌘K → "Terminal font…"**, type the font name (for example `Dank Mono`), Enter. **"Terminal font size…"** changes the size. Type `default` to reset. Both apply instantly and are remembered.
 - Colors and the terminal background follow the selected theme (**Settings → Appearance**, see [Settings](#settings)).
 

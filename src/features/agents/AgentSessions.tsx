@@ -6,6 +6,9 @@ import { agentStatus } from "./status";
 
 const dot: Record<string, string> = { Starting: "bg-warning", Running: "bg-teal", Exited: "bg-faint", Failed: "bg-danger" };
 
+/** Only live states animate (transform/opacity only; off under prefers-reduced-motion). */
+const live = new Set(["Starting", "Running"]);
+
 /** Agents section of the sidebar: launcher plus the agent sessions of the active workspace (AG-004). */
 export function AgentSessions() {
   const wsId = useStore((s) => s.activeWorkspaceId);
@@ -37,7 +40,10 @@ export function AgentSessions() {
         {items.map((i) => (
           <li key={i.paneId} className="group flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-raised/60">
             <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => reveal(i.paneId)} title={i.status.detail}>
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot[i.status.label]}`} />
+              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                {live.has(i.status.label) && <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 motion-safe:animate-ping ${dot[i.status.label]}`} />}
+                <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${dot[i.status.label]}`} />
+              </span>
               <span className="truncate text-[13px] text-muted">{i.name}</span>
               <span className="ml-auto shrink-0 text-[10px] text-faint">{i.status.label}</span>
             </button>

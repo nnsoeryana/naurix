@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { endTurn, noteOutput, startTurn } from "../naurix/activity";
 import { Channel } from "@tauri-apps/api/core";
 import { registerDevTerminal, unregisterDevTerminal } from "../../dev/devTerminals";
 import { Terminal } from "@xterm/xterm";
@@ -13,6 +14,7 @@ import { terminalTheme } from "../../themes/apply";
 import { terminalApi, type ExitPayload } from "./api";
 import { sessionRegistry } from "./registry";
 import { terminalHandles } from "./handles";
+import { IMAGE_PASTE_KEY, clipboardHasOnlyImage } from "./attach";
 
 export type TerminalState =
   | { kind: "starting" }
@@ -119,11 +121,13 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     const output = new Channel<ArrayBuffer>();
     output.onmessage = (buf) => {
       const bytes = new Uint8Array(buf);
+      noteOutput(initial.current.paneId);
       term.write(bytes, () => acks.add(bytes.length));
     };
     const exit = new Channel<ExitPayload>();
     exit.onmessage = (p) => {
       exited = true;
+      endTurn(initial.current.paneId);
       onStateRef.current({ kind: "exited", code: p.code, signal: p.signal });
     };
 
@@ -139,6 +143,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
           return;
         }
         id = sid;
+        if (a) startTurn(initial.current.paneId);
         sessionRegistry.set(initial.current.paneId, sid);
         onStateRef.current({ kind: "running" });
         acks.flush();
@@ -165,6 +170,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     const subs = [
       term.onData((d) => {
         if (exited) return;
+        if (initial.current.agent && d.includes("\r")) startTurn(initial.current.paneId);
         if (id === null) pendingInput += d;
         else terminalApi.write(id, d).catch(() => {});
       }),
@@ -175,6 +181,17 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
         if (id !== null && !exited) terminalApi.resize(id, rows, cols).catch(() => {});
       }),
     ];
+
+    // A pasted screenshot has no text, so xterm would paste nothing. Agent CLIs read the clipboard image
+    // themselves when they get Ctrl+V, so forward that key. Only when an image (and no text) is there.
+    const onPaste = (e: ClipboardEvent) => {
+      if (exited || !clipboardHasOnlyImage(e.clipboardData)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (id === null) pendingInput += IMAGE_PASTE_KEY;
+      else terminalApi.write(id, IMAGE_PASTE_KEY).catch(() => {});
+    };
+    el.addEventListener("paste", onPaste, true);
 
     let raf = 0;
     const ro = new ResizeObserver(() => {
@@ -188,10 +205,12 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       cancelAnimationFrame(raf);
       ro.disconnect();
       subs.forEach((s) => s.dispose());
+      el.removeEventListener("paste", onPaste, true);
       acks.dispose();
       output.onmessage = () => {};
       exit.onmessage = () => {};
       if (id !== null && !exited) terminalApi.terminate(id).catch(() => {});
+      endTurn(initial.current.paneId);
       handle.current = null;
       terminalHandles.delete(initial.current.paneId);
       if (import.meta.env.DEV) unregisterDevTerminal(initial.current.paneId);

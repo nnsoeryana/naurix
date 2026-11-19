@@ -39,6 +39,15 @@ pub struct General {
     pub close_on_clean_exit: bool,
     /// Ask before closing a pane or tab that still has something running.
     pub confirm_close_running: bool,
+    /// Show the Naurix companion card in the sidebar (docs/NAURIX_COMPANION.md).
+    #[serde(alias = "nauriEnabled")]
+    pub naurix_enabled: bool,
+    /// Animate Naurix. Off keeps a static visual.
+    #[serde(alias = "nauriAnimations")]
+    pub naurix_animations: bool,
+    /// Calmer, slower animation.
+    #[serde(alias = "nauriReduced")]
+    pub naurix_reduced: bool,
 }
 
 impl Default for General {
@@ -46,6 +55,9 @@ impl Default for General {
         Self {
             close_on_clean_exit: true,
             confirm_close_running: true,
+            naurix_enabled: true,
+            naurix_animations: true,
+            naurix_reduced: false,
         }
     }
 }
@@ -299,6 +311,9 @@ mod tests {
             (13, 5000, true)
         );
         assert!(s.general.close_on_clean_exit && s.general.confirm_close_running);
+        assert!(
+            s.general.naurix_enabled && s.general.naurix_animations && !s.general.naurix_reduced
+        );
         assert_eq!(
             (s.terminal.renderer, s.terminal.cursor_style),
             (Renderer::Dom, CursorStyle::Block)
