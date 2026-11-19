@@ -15,6 +15,9 @@ import { ContextMenu } from "./features/terminal/ContextMenu";
 import { Sidebar } from "./features/workspaces/Sidebar";
 import { SHORTCUTS, clipboardShortcut, matchShortcut, tabIndexShortcut } from "./shortcuts";
 import { copyPane, pastePane } from "./features/terminal/clipboard";
+import { pathsToPaste } from "./features/terminal/attach";
+import { terminalHandles } from "./features/terminal/handles";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { applyTheme, cacheAppearance } from "./themes/apply";
 import { activeSpace, useStore } from "./state/store";
 
@@ -49,6 +52,37 @@ export default function App() {
     const onFocus = () => void useStore.getState().refreshGit();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // Files dropped from Finder/Explorer: type their (quoted) paths into the pane under the pointer, or
+  // the active pane. Nothing is read or executed, and no Enter is sent. Tauri reports the drop position
+  // in physical pixels.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let cancelled = false;
+    getCurrentWebview()
+      .onDragDropEvent((ev) => {
+        if (ev.payload.type !== "drop") return;
+        const st = useStore.getState();
+        if (st.dialog || st.launcherOpen || st.contextMenu) return;
+        const text = pathsToPaste(ev.payload.paths);
+        if (!text) return;
+        const { x, y } = ev.payload.position;
+        const dpr = window.devicePixelRatio || 1;
+        const under = document.elementFromPoint(x / dpr, y / dpr)?.closest<HTMLElement>("[data-pane]")?.dataset.pane;
+        const sp = activeSpace(st);
+        const pane = under ?? sp?.tabs.find((t) => t.id === sp.activeTabId)?.activePaneId;
+        const handle = pane ? terminalHandles.get(pane) : undefined;
+        if (!handle) return st.setNotice("Drop files onto a terminal pane to insert their paths.");
+        handle.paste(text);
+        handle.focus();
+      })
+      .then((f) => (cancelled ? f() : (off = f)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      off?.();
+    };
   }, []);
 
   // Capture phase: win against xterm.js, which otherwise sees the key first.

@@ -134,6 +134,8 @@ Open the `.dmg` and drag **Naurix** into **Applications**. Notes:
 | ⇧⌘R | Rename tab (also: double-click the tab) |
 | ⇧⌘A | Launch an AI agent |
 
+**Attach files:** drag files from Finder / Explorer onto a pane and Naurix types their quoted paths at the cursor (no Enter, nothing is read or run; agents such as Claude Code turn an image path into an attachment). **Screenshots:** with an image on the clipboard, paste as usual (⌘V on macOS) and Naurix sends Ctrl+V to the program, which is how agent CLIs read a clipboard image. On Linux and Windows press **Ctrl+V** (not Ctrl+Shift+V, which pastes text). Plain-text paste is unchanged.
+
 **Right-click a terminal** for a menu: *Copy*, *Paste*, *Split Right / Left / Up / Down* and *Close Pane*. (⌘C / ⌘V on macOS, Ctrl+Shift+C / V on Linux and Windows; the menu's Paste reads the system clipboard only when you choose it, up to 1 MiB.)
 
 Shortcuts are defined in `src/shortcuts.ts`. Note that ⌘K opens the palette, so it does not clear the screen as in some terminals (use `clear` or Ctrl-L).

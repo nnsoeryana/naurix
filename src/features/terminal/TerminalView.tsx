@@ -13,6 +13,7 @@ import { terminalTheme } from "../../themes/apply";
 import { terminalApi, type ExitPayload } from "./api";
 import { sessionRegistry } from "./registry";
 import { terminalHandles } from "./handles";
+import { IMAGE_PASTE_KEY, clipboardHasOnlyImage } from "./attach";
 
 export type TerminalState =
   | { kind: "starting" }
@@ -176,6 +177,17 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       }),
     ];
 
+    // A pasted screenshot has no text, so xterm would paste nothing. Agent CLIs read the clipboard image
+    // themselves when they get Ctrl+V, so forward that key. Only when an image (and no text) is there.
+    const onPaste = (e: ClipboardEvent) => {
+      if (exited || !clipboardHasOnlyImage(e.clipboardData)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (id === null) pendingInput += IMAGE_PASTE_KEY;
+      else terminalApi.write(id, IMAGE_PASTE_KEY).catch(() => {});
+    };
+    el.addEventListener("paste", onPaste, true);
+
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
@@ -188,6 +200,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       cancelAnimationFrame(raf);
       ro.disconnect();
       subs.forEach((s) => s.dispose());
+      el.removeEventListener("paste", onPaste, true);
       acks.dispose();
       output.onmessage = () => {};
       exit.onmessage = () => {};
