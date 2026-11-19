@@ -1,6 +1,6 @@
 # Naurix — Implementation Plan
 
-**Progress:** M0–M10 done, plus the Naurix rename and brand UI (ADR 0013). Next: M11 (Intel/Apple Silicon release validation: signing, notarization, real-hardware runs).
+**Progress:** M0–M10 done, plus the Naurix rename and brand UI (ADR 0013). Next: M11a (Apple Silicon validation on real hardware). M11b (signing, notarization) is deferred until an Apple Developer Program account exists.
 
 Each milestone leaves the app runnable and is independently testable. Requirement IDs refer to PRD.md.
 
@@ -17,6 +17,7 @@ Each milestone leaves the app runnable and is independently testable. Requiremen
 | **M8** | Skills manager (SK-*) | staging → confirm → store → symlinks | M6 | Reversible install/uninstall; scripts never executed; existing file blocks | Fixture + symlink tests |
 | **M9** | Git status (GIT-001,002,004,007; diff P1) | `git` CLI porcelain v2 | M4 | Non-repo, detached HEAD, conflicts, missing git handled | Parser fixtures |
 | **M10** | Settings UI (7 sections), perf tuning | wire existing services | M5–M9 | All benchmark scenarios recorded; budgets confirmed or revised by ADR | Bench results; UI tests |
-| **M11** | Release validation | signing, notarization, manual checklists | M10 | Compatibility matrix filled from real runs on both archs | Checklist records |
+| **M11a** | Release validation (Intel + Apple Silicon) | manual checklists, benchmark runs on an arm64 Mac | M10 | Compatibility matrix filled from real runs on both archs (unsigned builds, recorded as such) | Checklist records; `bench/results/` arm64 JSON |
+| **M11b** | Signing and notarization | Developer ID signing, `notarytool`, `stapler` | M11a | `spctl`/`stapler` output recorded; Keychain tested with the signed build. **Blocked:** needs an Apple Developer Program account (not available yet) | Checklist records |
 
 Spike A (xterm.js+PTY) lands in M2–M3, Spike D in M2, Spike C in M6, Spike B (libghostty) after M10 as a decision record.

@@ -44,10 +44,10 @@ Something missing? `./run.sh doctor` prints the exact command to install it. The
 | Per-agent capability list, version, and deprecation notices, each marked *verified* or *documented only* ([matrix](docs/AGENT_ADAPTERS.md)) | ✅ |
 | **MCP Integrations**: add servers (catalog or manual), secrets in the macOS Keychain, explicit approval, test connection, preview / apply / undo sync to agent configs | ✅ |
 | **Git status** (read-only): branch, ahead/behind, changed files, conflicts, stash, diff, "Open in terminal" at the repo root | ✅ |
-| **Settings** (⌘,): general, terminal (font, scrollback, cursor, shell, renderer), agents, MCP, skills, performance, security | ✅ |
-| Release validation on Intel and Apple Silicon, signing | ⏳ M11 |
+| **Settings** (⌘,): general, appearance (9 themes, light/dark/system, accent), terminal (font, scrollback, cursor, shell, renderer), agents, MCP, skills, performance, security | ✅ |
+| Apple Silicon validation (arm64 runs on real hardware) | ⏳ M11a |
+| Signing and notarization | ⏳ M11b (needs an Apple Developer account; not planned yet) |
 | **Agent Skills**: install from a Git URL or a folder with a risk and compatibility review, enable per agent (symlink), update, switch back, uninstall | ✅ |
-| Settings screen, themes | ⏳ M10 |
 
 ## Try it
 
@@ -98,8 +98,8 @@ open target/release/bundle/dmg      # Naurix_<version>_<arch>.dmg  (x64 on Intel
 Open the `.dmg` and drag **Naurix** into **Applications**. Notes:
 
 - The first build compiles Rust in release mode (about 2–5 minutes). The version in the file name comes from `version` in `src-tauri/tauri.conf.json`.
-- The `.dmg` is built for the architecture of the Mac you build on. Building both needs both Macs (or `--target`, which is not validated yet, see M11).
-- It is **unsigned and not notarized**: on another Mac, macOS says the app is "damaged" or from an unidentified developer. Right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/Naurix.app`. Signing and notarization need an Apple Developer account and are planned for M11.
+- The `.dmg` is built for the architecture of the Mac you build on. Building both needs both Macs (or `--target`, which is not validated yet, see M11a).
+- It is **unsigned and not notarized**: on another Mac, macOS says the app is "damaged" or from an unidentified developer. Right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/Naurix.app`. Signing and notarization need an Apple Developer account and are deferred to M11b.
 - If the build fails with `Finder got an error: AppleEvent timed out`, macOS is blocking the script that lays out the installer window. Allow your terminal to control Finder (System Settings → Privacy & Security → Automation), or build a plain `.dmg` without the custom layout: `CI=true pnpm tauri build --bundles dmg` (`./run.sh dmg` retries this way automatically). Close any leftover *Naurix* disk in Finder before retrying.
 
 ### 5. First steps
@@ -135,7 +135,7 @@ Prompts such as Powerlevel10k draw their icons (the Apple logo, folder icon, `` 
 
 - Install one Nerd Font if prompts show empty boxes: `brew install --cask font-meslo-lg-nerd-font` (or the MesloLGS NF fonts from the p10k docs, which is what most p10k setups use).
 - Pick your own font: **⌘K → "Terminal font…"**, type the font name (for example `Dank Mono`), Enter. **"Terminal font size…"** changes the size. Type `default` to reset. Both apply instantly and are remembered.
-- Terminal background is `#051625` (dark navy). Full theme settings come with the Settings screen (M10).
+- Colors and the terminal background follow the selected theme (**Settings → Appearance**, see [Settings](#settings)).
 
 ### Launching an AI agent
 
@@ -259,11 +259,11 @@ Results go to `bench/results/`. Memory counts the app plus its WebKit helper pro
 
 ## Roadmap
 
-M0 docs ✅ · M1 scaffold + benchmark harness ✅ · M2 PTY + supervisor ✅ · M3 terminal view ✅ · M4 workspaces, tabs, panes, palette ✅ · M5 agent launch ✅ · M6 agent adapters ✅ · M7 MCP manager ✅ · M8 skills manager ✅ · M9 Git status ✅ · **M10 settings + performance ✅** · M11 Intel/arm64 release validation. Details: [Implementation Plan](docs/IMPLEMENTATION_PLAN.md).
+M0 docs ✅ · M1 scaffold + benchmark harness ✅ · M2 PTY + supervisor ✅ · M3 terminal view ✅ · M4 workspaces, tabs, panes, palette ✅ · M5 agent launch ✅ · M6 agent adapters ✅ · M7 MCP manager ✅ · M8 skills manager ✅ · M9 Git status ✅ · **M10 settings + performance ✅** · **M11a Apple Silicon validation ⏳ (no arm64 run yet)** · **M11b signing/notarization ⏳ (needs an Apple Developer account)**. Details: [Implementation Plan](docs/IMPLEMENTATION_PLAN.md).
 
 ## Look and feel
 
-The interface follows the Naurix brand system (`assets/brand/naurix-brand-system.png`): the **Aurora** palette, a sidebar with *Home / Projects / Agents* (MCP, Skills, Git and Settings are shown as **Soon** until they exist), pill-shaped tabs titled like `~/your/folder`, and a terminal-style welcome screen.
+The interface follows the Naurix brand system (`assets/brand/naurix-brand-system.png`): the **Aurora** palette, a sidebar with *Home / Projects / Agents / MCP / Skills / Git / Settings*, pill-shaped tabs titled like `~/your/folder`, and a terminal-style welcome screen.
 
 | Token | Color | Use |
 |---|---|---|
