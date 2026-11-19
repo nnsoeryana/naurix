@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+*.mobileprovision
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Tooling caches
+.vite/
+.cache/
+*.tsbuildinfo
+coverage/
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Local databases (app data must never be committed)
+*.sqlite
+*.sqlite3
+*.db
