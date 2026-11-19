@@ -2,7 +2,6 @@ use super::def::{plan_launch, validate_custom, AgentDef, AgentKind, CustomAgent,
 use super::AgentError;
 use crate::persistence::Db;
 use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 const K_CUSTOM: &str = "agents.custom";
@@ -111,11 +110,8 @@ impl<'a> AgentStore<'a> {
         match path {
             None => self.db.delete_setting(&k_path(id))?,
             Some(p) => {
-                let ok = p.starts_with('/')
-                    && Path::new(p)
-                        .metadata()
-                        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                        .unwrap_or(false);
+                let ok = crate::platform::is_absolute_str(p)
+                    && crate::platform::is_executable_file(Path::new(p));
                 if !ok {
                     return Err(AgentError::Invalid(
                         "Choose an executable file (absolute path).".into(),

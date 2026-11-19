@@ -192,10 +192,8 @@ pub async fn terminal_spawn(
     };
     // Shell program and flags come from Settings (validated in core); $SHELL is the default.
     let settings = naurix_core::settings::get(&terminals.db).map_err(|e| e.to_string())?;
-    let (program, args) = naurix_core::settings::shell_command(
-        &settings.terminal,
-        std::env::var("SHELL").ok().as_deref(),
-    );
+    let (program, args) =
+        naurix_core::settings::shell_command(&settings.terminal, shell_from_env().as_deref());
     let launch = Launch {
         spec_program: program,
         args,
@@ -379,4 +377,9 @@ pub fn debug_smoke_visual() -> Option<String> {
 #[tauri::command]
 pub fn debug_smoke_visual() -> Option<String> {
     None
+}
+
+/// The user's configured shell from the environment: `$SHELL` on Unix, `%COMSPEC%` on Windows.
+fn shell_from_env() -> Option<String> {
+    std::env::var(if cfg!(windows) { "COMSPEC" } else { "SHELL" }).ok()
 }

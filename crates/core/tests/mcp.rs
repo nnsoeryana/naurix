@@ -1,3 +1,4 @@
+#![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! MCP registry, secrets, approval, Test Connection and agent-config sync.
 use naurix_core::agents::search_dirs;
 use naurix_core::mcp::model::{McpInput, McpServer, Pair, Transport};

@@ -1,4 +1,5 @@
 import { IconBot, IconPlus, IconStop } from "../../components/icons";
+import { SHORTCUTS } from "../../shortcuts";
 import { paneIds } from "../layout/layout";
 import { useStore } from "../../state/store";
 import { agentStatus } from "./status";
@@ -27,7 +28,7 @@ export function AgentSessions() {
         <div className="flex flex-1 items-center gap-2.5 px-2.5 py-1.5 text-sm text-muted">
           <IconBot /> Agents
         </div>
-        <button className="rounded p-1 text-faint hover:bg-raised hover:text-cloud disabled:opacity-40" disabled={!wsId} onClick={() => launcher(true)} title="Launch AI agent (⇧⌘A)" aria-label="Launch AI agent">
+        <button className="rounded p-1 text-faint hover:bg-raised hover:text-cloud disabled:opacity-40" disabled={!wsId} onClick={() => launcher(true)} title={`Launch AI agent (${SHORTCUTS.launchAgent.label})`} aria-label="Launch AI agent">
           <IconPlus />
         </button>
       </div>

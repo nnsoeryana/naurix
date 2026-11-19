@@ -1,6 +1,6 @@
 use super::PtyError;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use crate::platform;
+use std::path::PathBuf;
 
 pub const MAX_DIMENSION: u16 = 1000;
 pub const MAX_INPUT_BYTES: usize = 1 << 20; // 1 MiB per write call
@@ -53,27 +53,22 @@ pub(crate) fn validate_size(rows: u16, cols: u16) -> Result<(), PtyError> {
     Ok(())
 }
 
-fn is_executable_file(p: &Path) -> bool {
-    p.metadata()
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-/// Resolve `program` to an executable path. Names containing `/` are used as-is; bare names are
-/// searched on the current process's `PATH`.
+/// Resolve `program` to an executable path. Names containing a path separator are used as-is; bare
+/// names are searched on the current process's `PATH` (with `PATHEXT` extensions on Windows).
 pub fn resolve_executable(program: &str) -> Result<PathBuf, PtyError> {
-    if program.contains('/') {
+    if platform::has_separator(program) {
         let p = PathBuf::from(program);
-        return if is_executable_file(&p) {
+        return if platform::is_executable_file(&p) {
             Ok(p)
         } else {
             Err(PtyError::ExecutableNotFound(program.into()))
         };
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
+    let names = platform::command_candidates(program);
     std::env::split_paths(&path)
-        .map(|d| d.join(program))
-        .find(|c| is_executable_file(c))
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
+        .find(|c| platform::is_executable_file(c))
         .ok_or_else(|| PtyError::ExecutableNotFound(program.into()))
 }
 
@@ -81,11 +76,19 @@ pub fn resolve_executable(program: &str) -> Result<PathBuf, PtyError> {
 mod tests {
     use super::*;
 
+    fn test_shell() -> &'static str {
+        if cfg!(windows) {
+            "cmd.exe"
+        } else {
+            "/bin/sh"
+        }
+    }
+
     fn spec() -> SpawnSpec {
         SpawnSpec {
-            program: "/bin/sh".into(),
+            program: test_shell().into(),
             args: vec![],
-            cwd: "/tmp".into(),
+            cwd: std::env::temp_dir(),
             env: vec![],
             rows: 24,
             cols: 80,
@@ -127,9 +130,14 @@ mod tests {
 
     #[test]
     fn resolves_bare_names_on_path() {
-        assert!(resolve_executable("sh").is_ok());
+        assert!(resolve_executable(if cfg!(windows) { "cmd" } else { "sh" }).is_ok());
         assert!(resolve_executable("definitely-not-a-real-binary-xyz").is_err());
         // a directory is not an executable file
-        assert!(resolve_executable("/usr/bin").is_err());
+        assert!(resolve_executable(if cfg!(windows) {
+            "C:\\Windows"
+        } else {
+            "/usr/bin"
+        })
+        .is_err());
     }
 }

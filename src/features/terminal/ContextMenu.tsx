@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { SHORTCUTS } from "../../shortcuts";
+import { COPY_HINT, PASTE_HINT, SHORTCUTS } from "../../shortcuts";
 import { useStore } from "../../state/store";
 import { terminalHandles } from "./handles";
+import { copyPane, pastePane } from "./clipboard";
 
 type Item = { label: string; hint?: string; disabled?: boolean; run: () => void } | "separator";
 
@@ -38,29 +38,18 @@ export function ContextMenu() {
   const handle = terminalHandles.get(paneId);
   const st = useStore.getState();
   const split = (dir: "row" | "col", placement: "after" | "before") => () => st.splitPaneAt(paneId, dir, placement);
-  const fail = (e: unknown) => useStore.getState().setNotice(String(e));
 
   const items: Item[] = [
     {
       label: "Copy",
-      hint: "⌘C",
+      hint: COPY_HINT,
       disabled: !handle?.hasSelection(),
-      run: () => {
-        const text = handle?.getSelection() ?? "";
-        if (text) invoke("clipboard_write", { text }).catch(fail);
-        handle?.focus();
-      },
+      run: () => copyPane(paneId),
     },
     {
       label: "Paste",
-      hint: "⌘V",
-      run: () =>
-        void invoke<string>("clipboard_read")
-          .then((text) => {
-            if (text) handle?.paste(text);
-            handle?.focus();
-          })
-          .catch(fail),
+      hint: PASTE_HINT,
+      run: () => pastePane(paneId),
     },
     "separator",
     { label: "Split Right", hint: SHORTCUTS.splitRight.label, run: split("row", "after") },

@@ -365,6 +365,7 @@ fn diffs_for_every_area_binary_large_and_invalid_paths() {
 
 // ---------------- hostile repositories ----------------
 
+#[cfg(unix)]
 fn marker_script(dir: &Path, name: &str) -> (PathBuf, PathBuf) {
     let marker = dir.join(format!("MARK-{name}"));
     let script = dir.join(format!("{name}.sh"));
@@ -380,6 +381,7 @@ fn marker_script(dir: &Path, name: &str) -> (PathBuf, PathBuf) {
     (script, marker)
 }
 
+#[cfg(unix)]
 #[test]
 fn repository_config_cannot_make_status_or_diff_run_commands() {
     let r = repo("evil");
@@ -440,6 +442,7 @@ fn repository_config_cannot_make_status_or_diff_run_commands() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_repository_that_defines_filters_or_includes_is_refused_until_trusted() {
     let r = repo("filter");

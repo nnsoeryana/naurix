@@ -16,3 +16,7 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
 naurix-core = { path = "../crates/core" }
+
+# Clipboard on Linux and Windows (macOS keeps pbcopy/pbpaste). ADR 0021.
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }

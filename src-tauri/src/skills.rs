@@ -18,9 +18,7 @@ fn err(e: impl ToString) -> String {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    naurix_core::platform::home_dir_or_empty()
 }
 
 fn workspace_root(db: &Db, workspace_id: Option<&str>) -> Result<Option<PathBuf>, String> {

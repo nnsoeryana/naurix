@@ -104,9 +104,7 @@ fn workspace_root(db: &Db, workspace_id: &str) -> Result<PathBuf, String> {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    naurix_core::platform::home_dir_or_empty()
 }
 
 #[tauri::command]

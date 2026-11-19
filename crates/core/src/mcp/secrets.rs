@@ -34,7 +34,8 @@ impl SecretStore for MemoryStore {
     }
 }
 
-/// macOS Keychain (generic passwords under [`KEYCHAIN_SERVICE`]).
+/// The OS credential store: macOS Keychain, Linux Secret Service, Windows Credential Manager
+/// (generic passwords under [`KEYCHAIN_SERVICE`]).
 #[derive(Default)]
 pub struct KeychainStore;
 
@@ -62,22 +63,41 @@ impl SecretStore for KeychainStore {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-impl SecretStore for KeychainStore {
-    fn get(&self, _: &str) -> Result<Option<String>, McpError> {
-        Err(McpError::Secret(
-            "the Keychain is only available on macOS".into(),
-        ))
+/// Secret Service (Linux) and Credential Manager (Windows) through the `keyring` crate.
+#[cfg(any(target_os = "linux", windows))]
+mod os_store {
+    use super::{McpError, SecretStore, KEYCHAIN_SERVICE};
+
+    fn entry(a: &str) -> Result<keyring::Entry, McpError> {
+        keyring::Entry::new(KEYCHAIN_SERVICE, a).map_err(err)
     }
-    fn set(&self, _: &str, _: &str) -> Result<(), McpError> {
-        Err(McpError::Secret(
-            "the Keychain is only available on macOS".into(),
-        ))
+
+    fn err(e: keyring::Error) -> McpError {
+        let hint = if cfg!(target_os = "linux") {
+            " Start or unlock a Secret Service keyring (GNOME Keyring or KWallet) and try again."
+        } else {
+            ""
+        };
+        McpError::Secret(format!("{e}.{hint}"))
     }
-    fn delete(&self, _: &str) -> Result<(), McpError> {
-        Err(McpError::Secret(
-            "the Keychain is only available on macOS".into(),
-        ))
+
+    impl SecretStore for super::KeychainStore {
+        fn get(&self, a: &str) -> Result<Option<String>, McpError> {
+            match entry(a)?.get_password() {
+                Ok(v) => Ok(Some(v)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(err(e)),
+            }
+        }
+        fn set(&self, a: &str, v: &str) -> Result<(), McpError> {
+            entry(a)?.set_password(v).map_err(err)
+        }
+        fn delete(&self, a: &str) -> Result<(), McpError> {
+            match entry(a)?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(err(e)),
+            }
+        }
     }
 }
 

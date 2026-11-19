@@ -8,6 +8,14 @@ test("home folders become ~", () => {
   expect(tildePath("/Users/lionel/x")).toBe("~/x");
 });
 
+test("Linux and Windows home folders become ~", () => {
+  expect(tildePath("/home/nana/code/app")).toBe("~/code/app");
+  expect(tildePath("/home/nana")).toBe("~");
+  expect(tildePath("C:\\Users\\nana\\code")).toBe("~\\code");
+  expect(tildePath("C:/Users/nana/code")).toBe("~/code");
+  expect(tildePath("D:\\work\\app")).toBe("D:\\work\\app");
+});
+
 test("repeated titles are numbered", () => {
   expect(uniqueTitle("~/a", [])).toBe("~/a");
   expect(uniqueTitle("~/a", ["~/a"])).toBe("~/a (2)");

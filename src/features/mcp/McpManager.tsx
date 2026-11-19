@@ -96,7 +96,7 @@ export function McpManager() {
                     {s.secrets.map((sec) => (
                       <li key={sec.name} className="flex items-center gap-2">
                         <span className="font-mono text-muted">{sec.name}</span>
-                        <span className={sec.hasValue ? "text-teal" : "text-warning"}>{sec.hasValue ? "● stored in Keychain" : "○ not set"}</span>
+                        <span className={sec.hasValue ? "text-teal" : "text-warning"}>{sec.hasValue ? "● stored in system keyring" : "○ not set"}</span>
                         {secretFor?.id === s.id && secretFor.name === sec.name ? (
                           <form
                             className="ml-auto flex items-center gap-2"
@@ -136,7 +136,7 @@ export function McpManager() {
                   <button
                     className={outline}
                     onClick={() =>
-                      useStore.getState().setDialog({ kind: "confirm", title: `Delete “${s.name}”?`, message: "Its stored secrets are removed from the Keychain. Entries Naurix wrote into agent configs are removed the next time you sync.", confirmLabel: "Delete", danger: true, onConfirm: () => void run(mcpApi.remove(s.id)) })
+                      useStore.getState().setDialog({ kind: "confirm", title: `Delete “${s.name}”?`, message: "Its stored secrets are removed from the system keyring. Entries Naurix wrote into agent configs are removed the next time you sync.", confirmLabel: "Delete", danger: true, onConfirm: () => void run(mcpApi.remove(s.id)) })
                     }
                   >
                     Delete

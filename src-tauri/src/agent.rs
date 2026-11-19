@@ -52,9 +52,7 @@ pub struct AgentDto {
 }
 
 pub(crate) fn dirs() -> Vec<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+    let home = naurix_core::platform::home_dir_or_empty();
     search_dirs(std::env::var_os("PATH").as_deref(), &home)
 }
 

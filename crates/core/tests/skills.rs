@@ -1,3 +1,4 @@
+#![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! Skills registry: install, links, update/revert, uninstall, and "never executes anything".
 use naurix_core::persistence::{new_id, Db};
 use naurix_core::skills::{CloneOptions, LinkHealth, SkillError, SkillStore, SourceKind};

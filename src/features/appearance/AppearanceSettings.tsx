@@ -11,7 +11,7 @@ const outline = "rounded-lg border border-line px-3 py-1 text-xs text-cloud hove
 const MODES: { id: AppearanceMode; label: string; hint: string }[] = [
   { id: "dark", label: "Dark", hint: "Always use the dark theme." },
   { id: "light", label: "Light", hint: "Always use the light theme." },
-  { id: "system", label: "Follow system", hint: "Switch with macOS Appearance." },
+  { id: "system", label: "Follow system", hint: "Switch with the system light/dark setting." },
 ];
 const ACCENT_PRESETS = ["#8b7cff", "#4f8cff", "#2ec4b6", "#f59e0b", "#ec4899", "#22c55e"];
 
@@ -50,7 +50,7 @@ export function AppearanceSettings() {
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">{title}</h3>
         <div role="radiogroup" aria-label={title} className="grid grid-cols-3 gap-3">
           {themesOfKind(kind).map((t) => (
-            <ThemeCard key={t.id} theme={t} selected={t.id === slot || (kind !== theme.kind && false)} inUse={t.id === theme.id} note={a.mode === "system" ? `Used when macOS is ${kind}` : undefined} onSelect={() => pick(t)} />
+            <ThemeCard key={t.id} theme={t} selected={t.id === slot || (kind !== theme.kind && false)} inUse={t.id === theme.id} note={a.mode === "system" ? `Used when the system is ${kind}` : undefined} onSelect={() => pick(t)} />
           ))}
         </div>
       </section>

@@ -1,3 +1,4 @@
+#![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! Adapter facts: completeness, the "only Verified is acted on" rule, and fixtures captured from
 //! the real CLIs (tests/fixtures/agents).
 use naurix_core::agents::*;

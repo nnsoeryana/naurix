@@ -12,6 +12,7 @@ mod workspace;
 use naurix_core::persistence::Db;
 use serde::Serialize;
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::Manager;
 use terminal::{SharedTerminals, Terminals};
@@ -33,6 +34,7 @@ fn app_info() -> AppInfo {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn build_menu<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
     // Custom menu: the default one binds Cmd+W to "Close Window", which must instead close a pane.
     let app = Submenu::with_items(
@@ -77,9 +79,12 @@ fn build_menu<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<
 }
 
 pub fn run() {
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .menu(build_menu)
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    // The custom menu only exists to rebind Cmd+W on macOS. Linux and Windows get no menu bar:
+    // terminal shortcuts are handled in the web view (see src/shortcuts.ts).
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_menu);
+    let app = builder
         .setup(|app| {
             // NAURIX_DATA_DIR (absolute path) points the app at a separate data folder, so tests and
             // experiments never touch your real workspaces. Without it, the standard app data folder is used.

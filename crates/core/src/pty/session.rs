@@ -2,6 +2,7 @@ use super::spec::{validate_size, SpawnSpec, MAX_INPUT_BYTES};
 use super::PtyError;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::RawFd;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -11,7 +12,10 @@ use std::time::Duration;
 /// PTY buffer fills, and the child blocks on write: this is the backpressure path.
 const EVENT_QUEUE: usize = 64;
 const READ_CHUNK: usize = 32 * 1024;
+#[cfg(unix)]
 const POLL_MS: i32 = 100;
+#[cfg(windows)]
+const POLL_MS: u64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExitInfo {
@@ -106,7 +110,7 @@ impl PtySession {
         let pid = child
             .process_id()
             .ok_or_else(|| PtyError::Spawn("no process id".into()))? as i32;
-        let mut reader = pair
+        let reader = pair
             .master
             .try_clone_reader()
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
@@ -116,6 +120,7 @@ impl PtySession {
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
         // Duplicate fd used only for poll(2), so the reader can notice child exit even when
         // a grandchild still holds the slave side open.
+        #[cfg(unix)]
         let poll_fd: RawFd = pair
             .master
             .as_raw_fd()
@@ -153,8 +158,13 @@ impl PtySession {
             std::thread::Builder::new()
                 .name(format!("pty-read-{pid}"))
                 .spawn(move || {
-                    pump(&mut reader, poll_fd, &tx, &exit);
-                    unsafe { libc::close(poll_fd) };
+                    #[cfg(unix)]
+                    {
+                        pump(reader, poll_fd, &tx, &exit);
+                        unsafe { libc::close(poll_fd) };
+                    }
+                    #[cfg(windows)]
+                    pump(reader, &tx, &exit);
                     let info = exit.wait(Duration::from_secs(5)).unwrap_or(ExitInfo {
                         code: None,
                         signal: None,
@@ -217,13 +227,15 @@ impl PtySession {
             .map_err(|e| PtyError::Io(std::io::Error::other(e.to_string())))
     }
 
-    /// Stop the process: SIGHUP (what closing a terminal does), then SIGTERM, then SIGKILL, each
-    /// after a third of `grace`. Signals go to the session's process group and to the PTY's
-    /// current foreground process group (which differs for jobs started by an interactive shell).
-    /// Finally the remaining members of the process groups are swept with SIGKILL.
+    /// Stop the process and its descendants. On Unix: SIGHUP (what closing a terminal does), then
+    /// SIGTERM, then SIGKILL, each after a third of `grace`, sent to the session's process group and
+    /// to the PTY's current foreground process group; the remaining members are then swept with
+    /// SIGKILL. On Windows there is no signal ladder: the process tree is ended with `taskkill /T /F`.
     ///
     /// Limitation: a process that deliberately detaches (setsid/daemonize, or a background job in
-    /// its own group that ignores SIGHUP) can escape; this is covered by Spike D.
+    /// its own group that ignores SIGHUP; on Windows a process that reparents itself) can escape; this
+    /// is covered by Spike D.
+    #[cfg(unix)]
     pub fn terminate(&self, grace: Duration) -> TerminateOutcome {
         let was_running = self.is_running();
         let mut groups = self.groups();
@@ -256,9 +268,21 @@ impl PtySession {
         outcome
     }
 
+    #[cfg(windows)]
+    pub fn terminate(&self, grace: Duration) -> TerminateOutcome {
+        if !self.is_running() {
+            return TerminateOutcome::AlreadyExited;
+        }
+        crate::platform::kill_process_tree(self.pid as u32);
+        let _ = grace; // no graceful step on Windows
+        self.exit.wait(Duration::from_secs(2));
+        TerminateOutcome::Forced
+    }
+
     /// True if something other than the session's own process (e.g. a command run from an
     /// interactive shell) currently owns the terminal's foreground. Used to decide whether closing
     /// should ask for confirmation. Best effort: false if it cannot be determined.
+    #[cfg(unix)]
     pub fn has_foreground_job(&self) -> bool {
         self.is_running()
             && self
@@ -269,6 +293,13 @@ impl PtySession {
                 .is_some_and(|fg| fg > 1 && fg != self.pid)
     }
 
+    /// Windows has no foreground process group; closing never asks for confirmation on that basis.
+    #[cfg(windows)]
+    pub fn has_foreground_job(&self) -> bool {
+        false
+    }
+
+    #[cfg(unix)]
     fn groups(&self) -> Vec<i32> {
         let mut v = vec![self.pid];
         if let Some(fg) = self.master.lock().unwrap().process_group_leader() {
@@ -280,12 +311,14 @@ impl PtySession {
     }
 }
 
+#[cfg(unix)]
 fn send_group(pgid: i32, sig: i32) {
     if pgid > 1 {
         unsafe { libc::killpg(pgid, sig) };
     }
 }
 
+#[cfg(unix)]
 fn readable(fd: RawFd) -> Option<bool> {
     let mut p = libc::pollfd {
         fd,
@@ -306,8 +339,9 @@ fn readable(fd: RawFd) -> Option<bool> {
     Some(p.revents & (libc::POLLIN | libc::POLLHUP) != 0)
 }
 
+#[cfg(unix)]
 fn pump(
-    reader: &mut Box<dyn Read + Send>,
+    mut reader: Box<dyn Read + Send>,
     poll_fd: RawFd,
     tx: &SyncSender<SessionEvent>,
     exit: &ExitState,
@@ -328,6 +362,50 @@ fn pump(
             // Nothing to read. If the child is gone, drain is complete.
             Some(false) => {
                 if exit.get().is_some() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Windows: ConPTY reads cannot be polled, and the read can stay blocked after the child exits. A
+/// helper thread does the blocking read and the pump waits on its channel, so it can notice exit.
+/// The helper ends when the master is dropped.
+#[cfg(windows)]
+fn pump(mut reader: Box<dyn Read + Send>, tx: &SyncSender<SessionEvent>, exit: &ExitState) {
+    let (chunks, incoming) = sync_channel::<Vec<u8>>(EVENT_QUEUE);
+    let _ = std::thread::Builder::new()
+        .name("pty-read-blocking".into())
+        .spawn(move || {
+            let mut buf = vec![0u8; READ_CHUNK];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => {
+                        if chunks.send(buf[..n].to_vec()).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+    loop {
+        match incoming.recv_timeout(Duration::from_millis(POLL_MS)) {
+            Ok(data) => {
+                if tx.send(SessionEvent::Output(data)).is_err() {
+                    return;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if exit.get().is_some() {
+                    // Deliver anything that arrived just before the exit was observed.
+                    while let Ok(data) = incoming.try_recv() {
+                        if tx.send(SessionEvent::Output(data)).is_err() {
+                            return;
+                        }
+                    }
                     return;
                 }
             }

@@ -8,7 +8,6 @@ use super::McpError;
 use crate::agents::find_executable;
 use serde::Serialize;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -50,8 +49,7 @@ fn fail(msg: impl Into<String>) -> ProbeResult {
 struct Guard(std::process::Child);
 impl Drop for Guard {
     fn drop(&mut self) {
-        let pid = self.0.id() as i32;
-        unsafe { libc::killpg(pid, libc::SIGKILL) };
+        crate::platform::kill_process_tree(self.0.id());
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -74,7 +72,7 @@ pub fn probe(
         return Err(McpError::NotApproved);
     }
     let cmd = server.command.as_deref().unwrap_or("");
-    let program = if cmd.starts_with('/') {
+    let program = if crate::platform::is_absolute_str(cmd) {
         PathBuf::from(cmd)
     } else {
         find_executable(cmd, dirs).unwrap_or_default()
@@ -99,13 +97,21 @@ pub fn probe(
         env.push((e.name.clone(), store.resolve(server, &e.value)?));
     }
 
-    let mut child = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(&args)
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(windows)]
+    {
+        // No console window for the probe; taskkill /T ends the tree.
+        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| McpError::Invalid(format!("Could not start the server: {e}")))?;
     let mut stdin = child.stdin.take().expect("piped");

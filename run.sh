@@ -2,9 +2,10 @@
 # Naurix: one command to check, run, build and install.
 #
 #   ./run.sh           run in development mode (default)
-#   ./run.sh app       build the app and open it
+#   ./run.sh app       build the app and open it (macOS)
 #   ./run.sh install   build the app and copy it to ~/Applications
-#   ./run.sh dmg       build a Naurix .dmg installer (target/release/bundle/dmg)
+#   ./run.sh dmg       build a Naurix .dmg installer (macOS; target/release/bundle/dmg)
+#   ./run.sh bundle    build installers for this OS (Linux: .deb, .rpm, .AppImage under target/release/bundle)
 #   ./run.sh sandbox   run a second copy with throwaway data (never touches your workspaces)
 #   ./run.sh test      run all tests and lint checks
 #   ./run.sh doctor    check that the tools you need are installed
@@ -28,10 +29,19 @@ doctor() {
     if eval "$2" >/dev/null 2>&1; then green "  ✓ $1"; else red "  ✗ $1"; echo "      fix: $3"; ok=1; fi
   }
   bold "Checking your setup…"
-  [ "$(uname -s)" = "Darwin" ] || { red "  ✗ macOS is required"; ok=1; }
-  check "Xcode command line tools" "xcode-select -p" "xcode-select --install"
+  case "$(uname -s)" in
+    Darwin)
+      check "Xcode command line tools" "xcode-select -p" "xcode-select --install" ;;
+    Linux)
+      check "C toolchain (cc)" "command -v cc" "install build-essential (Debian/Ubuntu) or gcc (Fedora)"
+      check "pkg-config" "command -v pkg-config" "sudo apt install pkg-config"
+      check "WebKitGTK 4.1" "pkg-config --exists webkit2gtk-4.1" "sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev"
+      check "D-Bus headers (secret store)" "pkg-config --exists dbus-1" "sudo apt install libdbus-1-dev" ;;
+    *)
+      red "  ✗ run.sh supports macOS and Linux. On Windows use PowerShell: pnpm install; pnpm tauri dev (see README)."; ok=1 ;;
+  esac
   check "Rust (cargo)" "command -v cargo" "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   (then open a new terminal)"
-  check "Node.js 22 or newer" "node -e 'process.exit(+process.versions.node.split(\".\")[0] >= 22 ? 0 : 1)'" "brew install node"
+  check "Node.js 22 or newer" "node -e 'process.exit(+process.versions.node.split(\".\")[0] >= 22 ? 0 : 1)'" "install Node 22+ (brew install node, or https://nodejs.org)"
   check "pnpm" "command -v pnpm" "npm install -g pnpm   (or: corepack enable)"
   [ "$ok" -eq 0 ] && green "All good. Architecture: $(uname -m)" || { red "Fix the items above, then run ./run.sh again."; return 1; }
 }
@@ -59,12 +69,14 @@ case "$cmd" in
     exec pnpm tauri dev
     ;;
   app)
+    [ "$(uname -s)" = "Darwin" ] || { red "'app' builds a macOS .app. Use './run.sh bundle' on this OS."; exit 2; }
     doctor
     build_app
     green "Built: $APP_PATH"
     open "$APP_PATH"
     ;;
   install)
+    [ "$(uname -s)" = "Darwin" ] || { red "'install' is macOS only. Install the package from './run.sh bundle' instead."; exit 2; }
     doctor
     build_app
     dest="${NAURIX_INSTALL_DIR:-$HOME/Applications}"
@@ -76,7 +88,15 @@ case "$cmd" in
     echo "Open it from Finder/Spotlight, or: open \"$dest/${APP_NAME}.app\""
     echo "It is unsigned. If macOS blocks it, right-click the app and choose Open."
     ;;
+  bundle)
+    doctor
+    deps
+    bold "Building installers for this OS (the first build takes a few minutes)…"
+    pnpm tauri build
+    ls -1 target/release/bundle/*/* 2>/dev/null || true
+    ;;
   dmg)
+    [ "$(uname -s)" = "Darwin" ] || { red "'dmg' is macOS only. Use './run.sh bundle'."; exit 2; }
     doctor
     deps
     bold "Building the .dmg installer (the first build takes a few minutes)…"
@@ -115,11 +135,11 @@ case "$cmd" in
     doctor
     ;;
   help|-h|--help)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *)
     red "Unknown command: $cmd"
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

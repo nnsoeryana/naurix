@@ -42,8 +42,23 @@ Scenarios: idle; 1, 4, 8 terminals; 4 concurrent mock agents; sustained output (
 
 Hardware: maintainer's Intel Mac (i5-8257U, macOS 14.6) and an Apple Silicon Mac. Cells stay empty until a recorded run exists. Minimum macOS version is decided in M1 from Tauri 2/WKWebView requirements and CI availability.
 
+### 5.1 Linux and Windows (ADR 0021)
+
+| Item | Linux x86_64 | Linux arm64 | Windows x86_64 | Windows arm64 | Evidence required to claim "works" |
+|---|---|---|---|---|---|
+| Build from clean checkout | | | | | CI log |
+| Launch, shell, resize, paste | | | | | Manual checklist on real hardware (include Wayland and X11 on Linux) |
+| PTY integration tests | | | | | `cargo test` on that OS (Windows: `pty_windows.rs` only) |
+| Process cleanup | | | | | Spike D report (Windows: `taskkill /T` tree kill) |
+| Secret store | | | | | Manual test: Secret Service with and without a keyring daemon; Credential Manager |
+| Skill links | n/a | n/a | | | Manual test with and without Developer Mode |
+| Each agent CLI launch | | | | | Spike C per agent and OS (config paths are verified on macOS only) |
+| Benchmarks | | | | | `bench/results/<date>-<os>-<arch>-…` (the harness uses macOS `ps`/`footprint` and needs porting first) |
+
+All cells are empty: the code exists but nothing has been run on these systems.
+
 ## 6. CI
-GitHub runners `macos-13` (x86_64) and `macos-14` (arm64) run `cargo test`, `clippy`, frontend tests. CI proves the build and automated tests per arch; it does not replace the manual checklist or benchmarks.
+GitHub runners `macos-13` (x86_64) and `macos-14` (arm64) run `cargo test`, `clippy`, frontend tests. `.github/workflows/ci.yml` also runs the same checks on `ubuntu-24.04` and `windows-latest` (not yet run). CI proves the build and automated tests per arch; it does not replace the manual checklist or benchmarks.
 
 ## 7. Recorded results
 

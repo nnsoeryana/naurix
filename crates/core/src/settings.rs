@@ -5,7 +5,6 @@
 
 use crate::persistence::{Db, DbError};
 use serde::{Deserialize, Serialize};
-use std::os::unix::fs::PermissionsExt;
 
 const KEY: &str = "app.settings";
 const LEGACY_FONT_FAMILY: &str = "terminal.fontFamily";
@@ -152,11 +151,8 @@ pub fn validate_font_family(s: &str) -> Result<String, DbError> {
 }
 
 fn is_executable_file(p: &str) -> bool {
-    p.starts_with('/')
-        && !p.contains('\0')
-        && std::fs::metadata(p)
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
+    crate::platform::is_absolute_str(p)
+        && crate::platform::is_executable_file(std::path::Path::new(p))
 }
 
 /// Strict validation for writes. Returns the normalized settings.
@@ -276,10 +272,10 @@ pub fn shell_command(t: &Terminal, env_shell: Option<&str>) -> (String, Vec<Stri
                 .filter(|p| is_executable_file(p))
                 .map(str::to_string)
         })
-        .unwrap_or_else(|| "/bin/zsh".to_string());
+        .unwrap_or_else(|| crate::platform::fallback_shell().0.to_string());
     (
         program,
-        if t.login_shell {
+        if t.login_shell && crate::platform::supports_login_flag() {
             vec!["-l".into()]
         } else {
             vec![]
@@ -349,6 +345,7 @@ mod tests {
             try_with(&|s| s.terminal.shell_path = Some("/etc/hosts".into())).is_err(),
             "not executable"
         );
+        #[cfg(unix)]
         assert!(try_with(&|s| s.terminal.shell_path = Some("/bin/sh".into())).is_ok());
         assert!(
             try_with(&|s| s.terminal.font_family = Some("   ".into()))
@@ -476,6 +473,7 @@ mod tests {
         assert_eq!(get(&db).unwrap().appearance, Appearance::default());
     }
 
+    #[cfg(unix)]
     #[test]
     fn shell_command_prefers_the_setting_then_env_then_zsh() {
         let mut t = Terminal::default();
@@ -483,10 +481,13 @@ mod tests {
             shell_command(&t, Some("/bin/sh")),
             ("/bin/sh".into(), vec!["-l".into()])
         );
-        assert_eq!(shell_command(&t, Some("/no/such")).0, "/bin/zsh");
+        assert_eq!(
+            shell_command(&t, Some("/no/such")).0,
+            crate::platform::fallback_shell().0
+        );
         assert_eq!(
             shell_command(&t, Some("relative")).0,
-            "/bin/zsh",
+            crate::platform::fallback_shell().0,
             "an invalid $SHELL is ignored"
         );
         t.shell_path = Some("/bin/bash".into());

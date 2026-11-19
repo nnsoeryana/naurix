@@ -1,12 +1,6 @@
+use crate::platform;
 use std::ffi::OsStr;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-
-fn is_exec(p: &Path) -> bool {
-    p.metadata()
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
 
 /// Directories to search for agent CLIs: the process `PATH` first, then common install locations.
 ///
@@ -18,9 +12,7 @@ pub fn search_dirs(process_path: Option<&OsStr>, home: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = process_path
         .map(|p| std::env::split_paths(p).collect())
         .unwrap_or_default();
-    for extra in [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
+    for extra in platform::extra_bin_dirs().iter().copied().chain([
         ".local/bin",
         ".claude/local",
         ".opencode/bin",
@@ -28,8 +20,8 @@ pub fn search_dirs(process_path: Option<&OsStr>, home: &Path) -> Vec<PathBuf> {
         ".npm-global/bin",
         ".cargo/bin",
         ".volta/bin",
-    ] {
-        dirs.push(if extra.starts_with('/') {
+    ]) {
+        dirs.push(if platform::is_absolute_str(extra) {
             PathBuf::from(extra)
         } else {
             home.join(extra)
@@ -50,15 +42,19 @@ pub fn search_dirs(process_path: Option<&OsStr>, home: &Path) -> Vec<PathBuf> {
 
 /// First executable file called `name` in `dirs`.
 pub fn find_executable(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    if name.is_empty() || name.contains('/') {
+    if name.is_empty() || platform::has_separator(name) {
         return None;
     }
-    dirs.iter().map(|d| d.join(name)).find(|p| is_exec(p))
+    let names = platform::command_candidates(name);
+    dirs.iter()
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
+        .find(|p| platform::is_executable_file(p))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("at-search-{tag}-{}", std::process::id()));
@@ -126,5 +122,24 @@ mod tests {
         assert_eq!(find_executable("adir", &dirs), None);
         assert_eq!(find_executable("../etc/passwd", &dirs), None);
         std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn finds_cmd_shims_without_the_extension() {
+        let d = std::env::temp_dir().join(format!("at-search-win-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let shim = d.join("fake-agent.cmd");
+        std::fs::write(&shim, "@echo off\r\n").unwrap();
+        std::fs::write(d.join("plain"), "x").unwrap();
+        let dirs = vec![d.clone()];
+        assert_eq!(find_executable("fake-agent", &dirs), Some(shim));
+        assert_eq!(find_executable("plain", &dirs), None);
+        std::fs::remove_dir_all(d).unwrap();
     }
 }

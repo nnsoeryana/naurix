@@ -23,9 +23,7 @@ pub struct Output {
 }
 
 pub fn find_git() -> Result<PathBuf, GitError> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+    let home = crate::platform::home_dir_or_empty();
     find_executable(
         "git",
         &search_dirs(std::env::var_os("PATH").as_deref(), &home),

@@ -20,4 +20,7 @@ Each milestone leaves the app runnable and is independently testable. Requiremen
 | **M11a** | Release validation (Intel + Apple Silicon) | manual checklists, benchmark runs on an arm64 Mac | M10 | Compatibility matrix filled from real runs on both archs (unsigned builds, recorded as such) | Checklist records; `bench/results/` arm64 JSON |
 | **M11b** | Signing and notarization | Developer ID signing, `notarytool`, `stapler` | M11a | `spctl`/`stapler` output recorded; Keychain tested with the signed build. **Blocked:** needs an Apple Developer Program account (not available yet) | Checklist records |
 
+| **M12a/b** | Linux readiness (ADR 0021; code done, unvalidated) | seams behind `cfg`/traits, then Secret Service, clipboard, shell default, bundles | M11a | Ubuntu CI green; manual checklist and benchmarks recorded on real Linux hardware | CI; checklist records |
+| **M13a/b/c** | Windows readiness (ADR 0021; code done, unvalidated) | ConPTY + Job Object, `PATHEXT` lookup, Credential Manager, skill link strategy, NSIS/MSI; signing deferred | M12a | Windows CI green; Spike D equivalent, checklist and benchmarks recorded on real Windows hardware | CI; checklist records |
+
 Spike A (xterm.js+PTY) lands in M2–M3, Spike D in M2, Spike C in M6, Spike B (libghostty) after M10 as a decision record.

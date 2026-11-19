@@ -5,6 +5,7 @@ pub mod credential;
 pub mod git;
 pub mod mcp;
 pub mod persistence;
+pub mod platform;
 pub mod pty;
 pub mod settings;
 pub mod skills;
@@ -33,6 +34,6 @@ mod tests {
     fn reports_host_arch_and_os() {
         let info = app_info();
         assert_eq!(info.arch, std::env::consts::ARCH);
-        assert_eq!(info.os, "macos");
+        assert_eq!(info.os, std::env::consts::OS);
     }
 }
