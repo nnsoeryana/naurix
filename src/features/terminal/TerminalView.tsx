@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { endTurn, noteOutput, startTurn } from "../nauri/activity";
 import { Channel } from "@tauri-apps/api/core";
 import { registerDevTerminal, unregisterDevTerminal } from "../../dev/devTerminals";
 import { Terminal } from "@xterm/xterm";
@@ -120,11 +121,13 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     const output = new Channel<ArrayBuffer>();
     output.onmessage = (buf) => {
       const bytes = new Uint8Array(buf);
+      noteOutput(initial.current.paneId);
       term.write(bytes, () => acks.add(bytes.length));
     };
     const exit = new Channel<ExitPayload>();
     exit.onmessage = (p) => {
       exited = true;
+      endTurn(initial.current.paneId);
       onStateRef.current({ kind: "exited", code: p.code, signal: p.signal });
     };
 
@@ -140,6 +143,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
           return;
         }
         id = sid;
+        if (a) startTurn(initial.current.paneId);
         sessionRegistry.set(initial.current.paneId, sid);
         onStateRef.current({ kind: "running" });
         acks.flush();
@@ -166,6 +170,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     const subs = [
       term.onData((d) => {
         if (exited) return;
+        if (initial.current.agent && d.includes("\r")) startTurn(initial.current.paneId);
         if (id === null) pendingInput += d;
         else terminalApi.write(id, d).catch(() => {});
       }),
@@ -205,6 +210,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       output.onmessage = () => {};
       exit.onmessage = () => {};
       if (id !== null && !exited) terminalApi.terminate(id).catch(() => {});
+      endTurn(initial.current.paneId);
       handle.current = null;
       terminalHandles.delete(initial.current.paneId);
       if (import.meta.env.DEV) unregisterDevTerminal(initial.current.paneId);

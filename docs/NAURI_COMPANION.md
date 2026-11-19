@@ -1,4 +1,4 @@
-# Nauri companion
+# Naurix companion
 
 A small animated aurora card at the bottom of the sidebar. It is decorative and informative only: it has no controls, never takes focus and never starts, stops or approves anything.
 
@@ -15,9 +15,9 @@ An original ribbon in the Naurix cyan / blue / violet, drawn as inline SVG (`fea
 | Error | dimmer ribbon + warning line | very slow sway, no flashing |
 
 ## Agent status mapping (honest by design)
-Nauri reads the existing `paneState` / `paneKinds` in the store; it has no lifecycle of its own (`features/nauri/state.ts`). Per AGENTS.md and `docs/AGENT_ADAPTERS.md`, Naurix has no reliable task-level signal yet, so only **process** facts are used:
+Naurix reads the existing `paneState` / `paneKinds` in the store; it has no lifecycle of its own (`features/nauri/state.ts`). Per AGENTS.md and `docs/AGENT_ADAPTERS.md`, Naurix has no reliable task-level signal yet, so only **process** facts are used:
 
-| Evidence | Nauri |
+| Evidence | Naurix |
 |---|---|
 | no agent pane alive | Idle |
 | agent `starting` / `running` | Working, text says "running" (what the agent is doing is not reported) |
@@ -35,10 +35,10 @@ All agent panes in all workspaces are counted. Priority: waiting > error > worki
 - Only `transform` and `opacity` animate; no filters, blur, canvas, WebGL, JS animation loops or extra WebView.
 - About 10-40 SVG nodes, one state at a time.
 - Animation pauses while the window is hidden (`visibilitychange`).
-- A disabled Nauri renders nothing and holds no store subscription or timer.
+- A disabled Naurix renders nothing and holds no store subscription or timer.
 
 ## Reduced motion and settings
-Settings > General: show Nauri (default on), animations (default on), reduced animation (about 2x slower). macOS Reduce Motion (`prefers-reduced-motion`) always gives the static visual. Stored in `general.nauriEnabled / nauriAnimations / nauriReduced` (`crates/core/src/settings.rs`; old settings files load with the defaults).
+Settings > General: show Naurix (default on), animations (default on), reduced animation (about 2x slower). macOS Reduce Motion (`prefers-reduced-motion`) always gives the static visual. Stored in `general.nauriEnabled / nauriAnimations / nauriReduced` (`crates/core/src/settings.rs`; old settings files load with the defaults).
 
 ## Adding a state
 1. Add it to `NauriMode` in `types.ts`.

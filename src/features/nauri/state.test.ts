@@ -64,7 +64,7 @@ describe("display and text", () => {
   });
   it("summarizes several agents without claiming task state", () => {
     const s = summarize({ a: run, b: run, c: run }, { a: agent, b: agent, c: agent });
-    expect(statusText("working", s)).toBe("3 agents running...");
+    expect(statusText("working", s)).toBe("Waiting for 3 agents...");
     for (const m of ["idle", "working", "waiting", "success", "error"] as const) expect(statusText(m, s)).toBeTruthy();
   });
 });
@@ -86,7 +86,7 @@ describe("motion", () => {
 
 describe("theme compatibility", () => {
   for (const t of THEMES) {
-    it(`${t.id} defines every color Nauri uses`, () => {
+    it(`${t.id} defines every color Naurix uses`, () => {
       const vars = cssVariables(resolveAppearance({ mode: t.kind, darkTheme: t.id, lightTheme: t.id, accent: null }, t.kind === "dark"));
       for (const v of ["--color-terminal", "--color-purple", "--color-teal", "--color-info", "--color-warning", "--color-muted", "--color-line"]) expect(vars[v], `${t.id} ${v}`).toMatch(/^#[0-9a-f]{6}$/i);
     });

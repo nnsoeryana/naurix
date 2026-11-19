@@ -3,7 +3,7 @@ import type { PaneKind } from "../../state/store";
 import type { MotionLevel, NauriMode, NauriSummary } from "./types";
 
 /**
- * Nauri only reflects what Naurix can prove (AGENTS.md: never claim waiting/completed without a reliable
+ * Naurix only reflects what Naurix can prove (AGENTS.md: never claim waiting/completed without a reliable
  * adapter signal). Today the only evidence is the PROCESS state, so:
  *  - starting/running  -> "running" (active motion, but we do not claim what the agent is doing)
  *  - failed, or exit with a non-zero code -> error
@@ -15,8 +15,11 @@ export function summarize(
   states: Record<string, TerminalState | undefined>,
   kinds: Record<string, PaneKind | undefined>,
   waitingPanes: ReadonlySet<string> = new Set(),
+  /** Panes mid-turn. Omitted = every live agent counts as busy. */
+  busyPanes?: ReadonlySet<string>,
 ): NauriSummary {
   let running = 0;
+  let busy = 0;
   let failed = 0;
   let waiting = 0;
   for (const [pane, kind] of Object.entries(kinds)) {
@@ -27,11 +30,12 @@ export function summarize(
       if (st.signal === null && st.code !== null && st.code !== 0) failed++;
     } else {
       running++;
+      if (!busyPanes || busyPanes.has(pane)) busy++;
       if (waitingPanes.has(pane)) waiting++;
     }
   }
-  const mode = waiting > 0 ? "waiting" : failed > 0 ? "error" : running > 0 ? "working" : "idle";
-  return { mode, running, failed, waiting };
+  const mode = waiting > 0 ? "waiting" : failed > 0 ? "error" : busy > 0 ? "working" : running > 0 ? "ready" : "idle";
+  return { mode, running, busy, failed, waiting };
 }
 
 /** Agent panes that just went from running to a clean exit. Compares two snapshots, so a restored/never-seen-running pane never fires. */
@@ -59,7 +63,9 @@ export function statusText(mode: NauriMode, s: NauriSummary): string {
     case "idle":
       return "Ready when you are. Let's build something!";
     case "working":
-      return s.running === 1 ? "Your agent is running..." : `${s.running} agents running...`;
+      return s.busy === 1 ? "Waiting for your agent's response..." : `Waiting for ${s.busy} agents...`;
+    case "ready":
+      return "Agent went quiet. Your turn!";
     case "waiting":
       return "An agent needs your attention.";
     case "success":

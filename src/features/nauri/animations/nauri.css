@@ -1,4 +1,4 @@
-/* Nauri companion. Only transform and opacity are animated, no filters, no blur, no canvas.
+/* Naurix companion. Only transform and opacity are animated, no filters, no blur, no canvas.
    Colors come from theme tokens so every Naurix theme keeps the cyan/blue/violet identity.
    Add a state: see docs/NAURI_COMPANION.md. */
 .nx-nauri {
@@ -11,28 +11,35 @@
 .nx-nauri[data-motion="off"] .nx-svg *,
 .nx-nauri[data-motion="off"] .nx-svg { animation: none !important; }
 .nx-nauri[data-motion="paused"] .nx-svg * { animation-play-state: paused !important; }
+/* Ready: the agent went quiet, so everything settles. */
+.nx-svg[data-mode="ready"] * { animation: none !important; }
 
-.nx-aura, .nx-float, .nx-gather, .nx-mote, .nx-burst, .nx-spark, .nx-sway { transform-box: fill-box; transform-origin: center; }
+.nx-bob, .nx-aura, .nx-float, .nx-gather, .nx-mote, .nx-burst, .nx-spark, .nx-sway { transform-box: fill-box; transform-origin: center; }
 .nx-tile { fill: var(--color-terminal); stroke: var(--color-line); stroke-width: 1; }
-.nx-aura { opacity: 0.5; animation: nx-breathe calc(5s * var(--nx-speed)) ease-in-out infinite; }
+.nx-glow { opacity: 0.6; transform-box: fill-box; transform-origin: center; animation: nx-breathe calc(2.4s * var(--nx-speed)) ease-in-out infinite; }
+.nx-svg[data-mode="working"] .nx-glow { animation-duration: calc(1s * var(--nx-speed)); }
+.nx-aura { opacity: 0.75; animation: nx-breathe calc(3s * var(--nx-speed)) ease-in-out infinite; }
 .nx-shadow { fill: var(--nx-c); opacity: 0.25; }
 .nx-warn { stroke: var(--color-warning); opacity: 0.85; }
 .nx-mote, .nx-spark, .nx-core { fill: var(--nx-a); }
 .nx-core { fill: var(--nx-b); opacity: 0.45; }
 
 /* Idle: slow float + breathing. */
-.nx-float { animation: nx-float calc(6s * var(--nx-speed)) ease-in-out infinite; }
-@keyframes nx-float { 50% { transform: translateY(-3px) rotate(-1.5deg); } }
-@keyframes nx-breathe { 50% { opacity: 0.8; transform: scale(1.06); } }
+.nx-float { animation: nx-float calc(3.2s * var(--nx-speed)) ease-in-out infinite; }
+@keyframes nx-float { 50% { transform: translateY(-5px) rotate(-4deg) scale(1.05); } }
+@keyframes nx-breathe { 50% { opacity: 1; transform: scale(1.18); } }
 
 /* Working: ribbons slide one full period (32 units) so the loop is seamless. */
-.nx-flow { animation: nx-flow calc(var(--d, 1.6s) * var(--nx-speed)) linear infinite; }
+.nx-flow { animation: nx-flow calc(var(--d, 1.6s) * 0.45 * var(--nx-speed)) linear infinite; }
 @keyframes nx-flow { to { transform: translateX(-32px); } }
-.nx-svg[data-mode="working"] .nx-aura { opacity: 0.8; animation-duration: calc(2.4s * var(--nx-speed)); }
+/* Each ribbon also swells and bobs at its own pace, so the whole thing visibly churns while an agent runs. */
+.nx-bob { animation: nx-bob calc(var(--b, 1.2s) * var(--nx-speed)) ease-in-out infinite; }
+@keyframes nx-bob { 0%, 100% { transform: translateY(-4px) scaleY(0.5); } 50% { transform: translateY(4px) scaleY(1.7); } }
+.nx-svg[data-mode="working"] .nx-aura { opacity: 0.85; animation-duration: calc(1.2s * var(--nx-speed)); }
 
 /* Waiting: slow, light gathers toward the centre and pulses. */
-.nx-gather { animation: nx-pulse calc(3.6s * var(--nx-speed)) ease-in-out infinite; }
-@keyframes nx-pulse { 50% { transform: scale(0.94); opacity: 0.85; } }
+.nx-gather { animation: nx-pulse calc(2.4s * var(--nx-speed)) ease-in-out infinite; }
+@keyframes nx-pulse { 50% { transform: scale(0.86); opacity: 0.7; } }
 .nx-mote { animation: nx-gather calc(3.2s * var(--nx-speed)) ease-in infinite; }
 @keyframes nx-gather { from { transform: translate(var(--dx), var(--dy)); opacity: 0; } 30% { opacity: 1; } to { transform: translate(0, 0); opacity: 0; } }
 
