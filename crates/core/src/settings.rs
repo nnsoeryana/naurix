@@ -311,7 +311,9 @@ mod tests {
             (13, 5000, true)
         );
         assert!(s.general.close_on_clean_exit && s.general.confirm_close_running);
-        assert!(s.general.naurix_enabled && s.general.naurix_animations && !s.general.naurix_reduced);
+        assert!(
+            s.general.naurix_enabled && s.general.naurix_animations && !s.general.naurix_reduced
+        );
         assert_eq!(
             (s.terminal.renderer, s.terminal.cursor_style),
             (Renderer::Dom, CursorStyle::Block)
