@@ -3,6 +3,7 @@ import { IS_MAC, SHORTCUTS } from "../../shortcuts";
 import { useStore } from "../../state/store";
 import markUrl from "../../assets/naurix-mark.svg";
 import { AgentSessions } from "../agents/AgentSessions";
+import { NauriCompanion } from "../nauri/components/NauriCompanion";
 
 const row = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm";
 
@@ -76,6 +77,8 @@ export function Sidebar() {
           <IconGear className={view === "settings" ? "text-purple" : ""} /> Settings
         </button>
       </nav>
+
+      <NauriCompanion />
     </aside>
   );
 }

@@ -6,7 +6,7 @@ export type CursorStyle = "block" | "bar" | "underline";
 export type Renderer = "dom" | "webgl";
 
 export type Settings = {
-  general: { closeOnCleanExit: boolean; confirmCloseRunning: boolean };
+  general: { closeOnCleanExit: boolean; confirmCloseRunning: boolean; nauriEnabled: boolean; nauriAnimations: boolean; nauriReduced: boolean };
   appearance: Appearance;
   terminal: {
     fontFamily: string | null;
@@ -22,7 +22,7 @@ export type Settings = {
 
 /** Mirrors `naurix_core::settings` defaults (used until the real values load). */
 export const DEFAULT_SETTINGS: Settings = {
-  general: { closeOnCleanExit: true, confirmCloseRunning: true },
+  general: { closeOnCleanExit: true, confirmCloseRunning: true, nauriEnabled: true, nauriAnimations: true, nauriReduced: false },
   appearance: DEFAULT_APPEARANCE,
   terminal: { fontFamily: null, fontSize: 13, scrollback: 5000, cursorBlink: true, cursorStyle: "block", renderer: "dom", loginShell: true, shellPath: null },
 };

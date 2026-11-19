@@ -39,6 +39,12 @@ pub struct General {
     pub close_on_clean_exit: bool,
     /// Ask before closing a pane or tab that still has something running.
     pub confirm_close_running: bool,
+    /// Show the Nauri companion card in the sidebar (docs/NAURI_COMPANION.md).
+    pub nauri_enabled: bool,
+    /// Animate Nauri. Off keeps a static visual.
+    pub nauri_animations: bool,
+    /// Calmer, slower animation.
+    pub nauri_reduced: bool,
 }
 
 impl Default for General {
@@ -46,6 +52,9 @@ impl Default for General {
         Self {
             close_on_clean_exit: true,
             confirm_close_running: true,
+            nauri_enabled: true,
+            nauri_animations: true,
+            nauri_reduced: false,
         }
     }
 }
@@ -299,6 +308,7 @@ mod tests {
             (13, 5000, true)
         );
         assert!(s.general.close_on_clean_exit && s.general.confirm_close_running);
+        assert!(s.general.nauri_enabled && s.general.nauri_animations && !s.general.nauri_reduced);
         assert_eq!(
             (s.terminal.renderer, s.terminal.cursor_style),
             (Renderer::Dom, CursorStyle::Block)

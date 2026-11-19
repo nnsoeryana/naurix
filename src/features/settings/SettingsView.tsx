@@ -78,6 +78,13 @@ export function SettingsView() {
             <Row label="Naurix" hint="Everything stays on this Mac."><span className="font-mono text-xs text-muted">{sec ? `v${sec.version} · ${sec.arch}` : "…"}</span></Row>
             <Row label="Close a shell when it exits" hint="A shell that ends normally (code 0) closes its pane. Failures and agent panes stay open so you can read them."><Toggle label="Close pane on clean exit" checked={settings.general.closeOnCleanExit} onChange={(v) => general({ closeOnCleanExit: v })} /></Row>
             <Row label="Ask before closing running work" hint="Confirm before closing a pane or tab where a command or an agent is still running."><Toggle label="Confirm closing running work" checked={settings.general.confirmCloseRunning} onChange={(v) => general({ confirmCloseRunning: v })} /></Row>
+            <Row label="Nauri companion" hint="A small aurora companion at the bottom of the sidebar. It reflects your agents' process state (running, failed, exited) and never changes how they run."><Toggle label="Show Nauri" checked={settings.general.nauriEnabled} onChange={(v) => general({ nauriEnabled: v })} /></Row>
+            {settings.general.nauriEnabled && (
+              <>
+                <Row label="Nauri animations" hint="Off keeps a still Nauri. Animation also stops automatically when macOS Reduce Motion is on or the window is hidden."><Toggle label="Animate Nauri" checked={settings.general.nauriAnimations} onChange={(v) => general({ nauriAnimations: v })} /></Row>
+                <Row label="Reduced animation" hint="Slower, calmer movement."><Toggle label="Reduce Nauri animation" checked={settings.general.nauriReduced} onChange={(v) => general({ nauriReduced: v })} /></Row>
+              </>
+            )}
             <Row label="Reset" hint="Restores every setting on this screen to its default. Projects, agents, MCP servers and skills are not affected."><button className={outline} onClick={() => useStore.getState().setDialog({ kind: "confirm", title: "Reset all settings?", message: "Terminal, general and performance options go back to their defaults.", confirmLabel: "Reset", danger: true, onConfirm: () => void useStore.getState().resetSettings() })}>Reset all settings…</button></Row>
           </>
         )}
