@@ -149,6 +149,19 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       })
       .catch((e) => onStateRef.current({ kind: "failed", message: String(e) }));
 
+    // xterm sends a plain CR for Shift+Enter, which submits. Send ESC+CR instead so
+    // agent CLIs insert a newline while the user is still composing.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.type === "keydown" && !exited) {
+          if (id === null) pendingInput += "\x1b\r";
+          else terminalApi.write(id, "\x1b\r").catch(() => {});
+        }
+        return false;
+      }
+      return true;
+    });
+
     const subs = [
       term.onData((d) => {
         if (exited) return;
