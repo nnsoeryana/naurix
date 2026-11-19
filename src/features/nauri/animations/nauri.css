@@ -11,8 +11,9 @@
 .nx-nauri[data-motion="off"] .nx-svg *,
 .nx-nauri[data-motion="off"] .nx-svg { animation: none !important; }
 .nx-nauri[data-motion="paused"] .nx-svg * { animation-play-state: paused !important; }
-/* Ready: the agent went quiet, so everything settles. */
-.nx-svg[data-mode="ready"] * { animation: none !important; }
+/* Ready: the agent went quiet, so it calms down (slower than idle) but keeps breathing. */
+.nx-svg[data-mode="ready"] .nx-float { animation-duration: calc(6s * var(--nx-speed)); }
+.nx-svg[data-mode="ready"] .nx-glow, .nx-svg[data-mode="ready"] .nx-aura { animation-duration: calc(5s * var(--nx-speed)); }
 
 .nx-bob, .nx-aura, .nx-float, .nx-gather, .nx-mote, .nx-burst, .nx-spark, .nx-sway { transform-box: fill-box; transform-origin: center; }
 .nx-tile { fill: var(--color-terminal); stroke: var(--color-line); stroke-width: 1; }

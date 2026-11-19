@@ -9,6 +9,7 @@ An original ribbon in the Naurix cyan / blue / violet, drawn as inline SVG (`fea
 | State | Look | Motion |
 |---|---|---|
 | Idle | one soft ribbon, aura | slow float, breathing |
+| Ready | same ribbon as idle | even slower float; an agent is alive but went quiet ("Your turn!") |
 | Working | five flowing ribbons | seamless horizontal flow |
 | Waiting | thin wisp, motes | slow pulse, light gathers to the centre |
 | Success | radial burst, sparkles | one burst, about 2.4 s, then back to idle |
@@ -20,7 +21,8 @@ Naurix reads the existing `paneState` / `paneKinds` in the store; it has no life
 | Evidence | Naurix |
 |---|---|
 | no agent pane alive | Idle |
-| agent `starting` / `running` | Working, text says "running" (what the agent is doing is not reported) |
+| agent `starting` / `running`, output flowing after the user's Enter or the launch | Working, text says "Waiting for your agent's response..." (a heuristic, not an agent signal) |
+| agent alive, no output for 3.5 s (`QUIET_MS` in `activity.ts`) | Ready |
 | `failed`, or exit with non-zero code | Error |
 | exit by signal (user stopped it) | nothing |
 | `running` -> exit code 0 observed live | one Success burst |
@@ -29,7 +31,7 @@ Naurix reads the existing `paneState` / `paneKinds` in the store; it has no life
 Success is an event, not a state: it fires only on a live running -> clean-exit transition, so restoring state, stopping an agent or a failure never plays it. Success text is "finished cleanly", not "task completed".
 
 ## Multiple agents
-All agent panes in all workspaces are counted. Priority: waiting > error > working > idle. Success is shown only when nothing outranks it. Text: "3 agents running...", "2 agents ended with errors."
+All agent panes in all workspaces are counted. Priority: waiting > error > working > ready > idle. Turn activity (`features/nauri/activity.ts`) holds only pane ids and timers, never terminal content. Success is shown only when nothing outranks it. Text: "Waiting for 3 agents...", "2 agents ended with errors."
 
 ## Performance
 - Only `transform` and `opacity` animate; no filters, blur, canvas, WebGL, JS animation loops or extra WebView.

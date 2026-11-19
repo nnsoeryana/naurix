@@ -15,6 +15,14 @@ const bad: TerminalState = { kind: "exited", code: 2, signal: null };
 const killed: TerminalState = { kind: "exited", code: null, signal: "Killed: 9" };
 
 describe("summarize", () => {
+  it("is ready when agents are alive but none is mid-turn, working when one is", () => {
+    const k = { a: agent, b: agent };
+    expect(summarize({ a: run, b: run }, k, undefined, new Set()).mode).toBe("ready");
+    const s = summarize({ a: run, b: run }, k, undefined, new Set(["b"]));
+    expect(s.mode).toBe("working");
+    expect(s.busy).toBe(1);
+    expect(summarize({}, {}, undefined, new Set(["x"])).mode).toBe("idle");
+  });
   it("is idle with no agent, and ignores shells", () => {
     expect(summarize({}, {}).mode).toBe("idle");
     expect(summarize({ s: run }, { s: shell }).mode).toBe("idle");
