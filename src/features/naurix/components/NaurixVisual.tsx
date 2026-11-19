@@ -1,6 +1,6 @@
 import { useId } from "react";
-import type { NauriMode } from "../types";
-import "../animations/nauri.css";
+import type { NaurixMode } from "../types";
+import "../animations/naurix.css";
 
 
 /** A wave of `n` half-periods (16 units each) starting at x0. One full period is 32 units. */
@@ -15,7 +15,7 @@ const MOTES = [
 ];
 
 /** Original aurora ribbon in Naurix cyan/blue/violet (theme tokens). Only the active state is in the DOM. */
-export function NauriVisual({ mode, size = 44 }: { mode: NauriMode; size?: number }) {
+export function NaurixVisual({ mode, size = 44 }: { mode: NaurixMode; size?: number }) {
   const g = useId();
   const stroke = `url(#${g}-s)`;
   return (

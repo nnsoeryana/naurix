@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { endTurn, noteOutput, startTurn } from "../nauri/activity";
+import { endTurn, noteOutput, startTurn } from "../naurix/activity";
 import { Channel } from "@tauri-apps/api/core";
 import { registerDevTerminal, unregisterDevTerminal } from "../../dev/devTerminals";
 import { Terminal } from "@xterm/xterm";

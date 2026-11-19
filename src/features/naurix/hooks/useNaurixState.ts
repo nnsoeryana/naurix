@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { getBusyPanes, subscribeActivity } from "../activity";
 import { useStore } from "../../../state/store";
 import { detectCompletions, displayMode, motionLevel, statusText, summarize, SUCCESS_MS } from "../state";
-import type { MotionLevel, NauriMode } from "../types";
+import type { MotionLevel, NaurixMode } from "../types";
 
 /** Derives Naurix's mode from the existing agent pane state; owns no agent state of its own. */
-export function useNauriState(): { mode: NauriMode; text: string } {
+export function useNaurixState(): { mode: NaurixMode; text: string } {
   const states = useStore((s) => s.paneState);
   const kinds = useStore((s) => s.paneKinds);
   const busy = useSyncExternalStore(subscribeActivity, getBusyPanes);
@@ -29,7 +29,7 @@ export function useNauriState(): { mode: NauriMode; text: string } {
 }
 
 /** Settings + system "reduce motion" + window visibility -> how much Naurix may move. */
-export function useNauriMotion(animations: boolean, reduced: boolean): MotionLevel {
+export function useNaurixMotion(animations: boolean, reduced: boolean): MotionLevel {
   const [systemReduced, setSystemReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [hidden, setHidden] = useState(() => document.hidden);
   useEffect(() => {

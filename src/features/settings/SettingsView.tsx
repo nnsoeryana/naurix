@@ -78,11 +78,11 @@ export function SettingsView() {
             <Row label="Naurix" hint="Everything stays on this Mac."><span className="font-mono text-xs text-muted">{sec ? `v${sec.version} · ${sec.arch}` : "…"}</span></Row>
             <Row label="Close a shell when it exits" hint="A shell that ends normally (code 0) closes its pane. Failures and agent panes stay open so you can read them."><Toggle label="Close pane on clean exit" checked={settings.general.closeOnCleanExit} onChange={(v) => general({ closeOnCleanExit: v })} /></Row>
             <Row label="Ask before closing running work" hint="Confirm before closing a pane or tab where a command or an agent is still running."><Toggle label="Confirm closing running work" checked={settings.general.confirmCloseRunning} onChange={(v) => general({ confirmCloseRunning: v })} /></Row>
-            <Row label="Naurix companion" hint="A small aurora companion at the bottom of the sidebar. It reflects your agents' process state (running, failed, exited) and never changes how they run."><Toggle label="Show Naurix" checked={settings.general.nauriEnabled} onChange={(v) => general({ nauriEnabled: v })} /></Row>
-            {settings.general.nauriEnabled && (
+            <Row label="Naurix companion" hint="A small aurora companion at the bottom of the sidebar. It reflects your agents' process state (running, failed, exited) and never changes how they run."><Toggle label="Show Naurix" checked={settings.general.naurixEnabled} onChange={(v) => general({ naurixEnabled: v })} /></Row>
+            {settings.general.naurixEnabled && (
               <>
-                <Row label="Naurix animations" hint="Off keeps a still Naurix. Animation also stops automatically when macOS Reduce Motion is on or the window is hidden."><Toggle label="Animate Naurix" checked={settings.general.nauriAnimations} onChange={(v) => general({ nauriAnimations: v })} /></Row>
-                <Row label="Reduced animation" hint="Slower, calmer movement."><Toggle label="Reduce Naurix animation" checked={settings.general.nauriReduced} onChange={(v) => general({ nauriReduced: v })} /></Row>
+                <Row label="Naurix animations" hint="Off keeps a still Naurix. Animation also stops automatically when macOS Reduce Motion is on or the window is hidden."><Toggle label="Animate Naurix" checked={settings.general.naurixAnimations} onChange={(v) => general({ naurixAnimations: v })} /></Row>
+                <Row label="Reduced animation" hint="Slower, calmer movement."><Toggle label="Reduce Naurix animation" checked={settings.general.naurixReduced} onChange={(v) => general({ naurixReduced: v })} /></Row>
               </>
             )}
             <Row label="Reset" hint="Restores every setting on this screen to its default. Projects, agents, MCP servers and skills are not affected."><button className={outline} onClick={() => useStore.getState().setDialog({ kind: "confirm", title: "Reset all settings?", message: "Terminal, general and performance options go back to their defaults.", confirmLabel: "Reset", danger: true, onConfirm: () => void useStore.getState().resetSettings() })}>Reset all settings…</button></Row>
@@ -93,7 +93,7 @@ export function SettingsView() {
 
         {section === "Terminal" && (
           <>
-            <Row label="Font" hint={<>Your own font comes first, then Nerd Fonts for prompt icons. Leave empty for the default. Try <code>Dank Mono</code> or <code>JetBrains Mono</code>.</>}><Draft aria-label="Font family" className="w-72" value={t.fontFamily ?? ""} placeholder="Default" onCommit={(v) => terminal({ fontFamily: v.trim() || null })} /></Row>
+            <Row label="Font" hint={<>Your own font comes first, then Nerd Fonts for prompt icons (install one if icons show as empty boxes; see the README). Leave empty for the default. Try <code>Dank Mono</code> or <code>JetBrains Mono</code>.</>}><Draft aria-label="Font family" className="w-72" value={t.fontFamily ?? ""} placeholder="Default" onCommit={(v) => terminal({ fontFamily: v.trim() || null })} /></Row>
             <Row label="Font size" hint={`${FONT_MIN}–${FONT_MAX}`}><Draft aria-label="Font size" type="number" min={FONT_MIN} max={FONT_MAX} className="w-24" value={String(t.fontSize)} onCommit={(v) => terminal({ fontSize: Number(v) })} /></Row>
             <Row label="Scrollback (lines)" hint={`${SCROLLBACK_MIN}–${SCROLLBACK_MAX}. More lines use more memory per terminal.`}>
               <div className="flex items-center gap-2">

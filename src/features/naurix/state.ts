@@ -1,6 +1,6 @@
 import type { TerminalState } from "../terminal/TerminalView";
 import type { PaneKind } from "../../state/store";
-import type { MotionLevel, NauriMode, NauriSummary } from "./types";
+import type { MotionLevel, NaurixMode, NaurixSummary } from "./types";
 
 /**
  * Naurix only reflects what Naurix can prove (AGENTS.md: never claim waiting/completed without a reliable
@@ -17,7 +17,7 @@ export function summarize(
   waitingPanes: ReadonlySet<string> = new Set(),
   /** Panes mid-turn. Omitted = every live agent counts as busy. */
   busyPanes?: ReadonlySet<string>,
-): NauriSummary {
+): NaurixSummary {
   let running = 0;
   let busy = 0;
   let failed = 0;
@@ -53,12 +53,12 @@ export function detectCompletions(
 }
 
 /** What is shown: waiting and error always outrank the temporary success burst. */
-export function displayMode(summary: NauriSummary, celebrating: boolean): NauriMode {
+export function displayMode(summary: NaurixSummary, celebrating: boolean): NaurixMode {
   if (summary.mode === "waiting" || summary.mode === "error") return summary.mode;
   return celebrating ? "success" : summary.mode;
 }
 
-export function statusText(mode: NauriMode, s: NauriSummary): string {
+export function statusText(mode: NaurixMode, s: NaurixSummary): string {
   switch (mode) {
     case "idle":
       return "Ready when you are. Let's build something!";

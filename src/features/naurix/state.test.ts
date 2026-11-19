@@ -88,7 +88,7 @@ describe("motion", () => {
   });
   it("is on by default", () => {
     const g = DEFAULT_SETTINGS.general;
-    expect([g.nauriEnabled, g.nauriAnimations, g.nauriReduced]).toEqual([true, true, false]);
+    expect([g.naurixEnabled, g.naurixAnimations, g.naurixReduced]).toEqual([true, true, false]);
   });
 });
 

@@ -1,16 +1,16 @@
 /* Naurix companion. Only transform and opacity are animated, no filters, no blur, no canvas.
    Colors come from theme tokens so every Naurix theme keeps the cyan/blue/violet identity.
-   Add a state: see docs/NAURI_COMPANION.md. */
-.nx-nauri {
+   Add a state: see docs/NAURIX_COMPANION.md. */
+.nx-naurix {
   --nx-a: var(--color-teal);
   --nx-b: var(--color-info);
   --nx-c: var(--color-purple);
   --nx-speed: 1; /* >1 = slower */
 }
-.nx-nauri[data-motion="reduced"] { --nx-speed: 2.2; }
-.nx-nauri[data-motion="off"] .nx-svg *,
-.nx-nauri[data-motion="off"] .nx-svg { animation: none !important; }
-.nx-nauri[data-motion="paused"] .nx-svg * { animation-play-state: paused !important; }
+.nx-naurix[data-motion="reduced"] { --nx-speed: 2.2; }
+.nx-naurix[data-motion="off"] .nx-svg *,
+.nx-naurix[data-motion="off"] .nx-svg { animation: none !important; }
+.nx-naurix[data-motion="paused"] .nx-svg * { animation-play-state: paused !important; }
 /* Ready: the agent went quiet, so it calms down (slower than idle) but keeps breathing. */
 .nx-svg[data-mode="ready"] .nx-float { animation-duration: calc(6s * var(--nx-speed)); }
 .nx-svg[data-mode="ready"] .nx-glow, .nx-svg[data-mode="ready"] .nx-aura { animation-duration: calc(5s * var(--nx-speed)); }
