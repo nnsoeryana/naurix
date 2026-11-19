@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+/* Naurix brand tokens (Aurora). See docs/adr/0013 and assets/brand/. */
+@theme {
+  --color-midnight: #0b1020;
+  --color-surface: #0f1530;
+  --color-raised: #161d3d;
+  --color-line: #232b52;
+  --color-purple: #8b7cff;
+  --color-teal: #39d6c5;
+  --color-cloud: #f4f7ff;
+  --color-muted: #a3accb;
+  --color-faint: #6c7599;
+  /* Semantic tokens. The values below are the Naurix Dark defaults; `src/themes` overrides every one of
+     them at runtime (docs/THEME_SYSTEM.md). Components use these names, never palette colors. */
+  --color-on-accent: #0b1020;
+  --color-sidebar: #0f1530;
+  --color-dialog: #0f1530;
+  --color-popover: #161d3d;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-ring: #8b7cff;
+  --color-selection: rgba(139, 124, 255, 0.35);
+  --color-success: #39d6c5;
+  --color-warning: #fcd34d;
+  --color-danger: #ff7a90;
+  --color-info: #7cb7ff;
+  --color-terminal: #0b1020;
+  --font-mono: "MesloLGS NF", "JetBrainsMono Nerd Font", ui-monospace, Menlo, monospace;
+}
+
+/* Not a color: the accent button background (a gradient for Naurix themes, solid otherwise). */
+:root { --btn-accent: linear-gradient(135deg, #8b7cff, #39d6c5); }
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--color-midnight);
+  color: var(--color-cloud);
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+input, textarea { user-select: text; }
+
+/* Primary action. Its label color is chosen per theme/accent to keep at least 4.5:1 contrast. */
+.btn-primary {
+  background-image: var(--btn-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-danger {
+  background: var(--color-danger);
+  color: var(--color-midnight);
+  font-weight: 600;
+}
+.btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* Keyboard focus is always visible, in every theme. */
+:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+::selection { background: var(--color-selection); }
+
+.aurora-text {
+  background-image: linear-gradient(90deg, var(--color-purple), var(--color-teal));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Soft aurora glow used behind the Home screen only (never behind a terminal). */
+.aurora-glow {
+  background:
+    radial-gradient(60% 45% at 25% 105%, color-mix(in srgb, var(--color-purple) 28%, transparent), transparent 70%),
+    radial-gradient(55% 40% at 70% 108%, color-mix(in srgb, var(--color-teal) 26%, transparent), transparent 70%);
+}
+
+@keyframes nx-blink { 50% { opacity: 0; } }
+.nx-cursor { animation: nx-blink 1.1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .nx-cursor { animation: none; } }
