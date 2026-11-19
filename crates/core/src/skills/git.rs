@@ -81,8 +81,11 @@ pub fn clone_shallow(
     .arg(dest);
     cmd.env("GIT_ALLOW_PROTOCOL", allow)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "/usr/bin/false")
         .env("GIT_CONFIG_NOSYSTEM", "1");
+    // Never prompt: stdin is null, GIT_TERMINAL_PROMPT=0 and the credential helper is cleared. Unix
+    // also points askpass at `false`; Windows has no equivalent binary at a fixed path.
+    #[cfg(unix)]
+    cmd.env("GIT_ASKPASS", "/usr/bin/false");
     if opts.allow_local {
         cmd.env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "protocol.file.allow")

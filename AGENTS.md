@@ -18,9 +18,10 @@ Before implementing:
 - Metadata-first persistence: do not persist terminal input/output, prompts, environment values, or source content by default.
 - User control: do not silently execute commands, approve agent actions, or mutate Git state.
 - Hybrid agent support: PTY CLI launch is the fallback; structured capabilities are optional and must be verified.
-- Secrets only in macOS Keychain; never in SQLite, logs, or the webview after save.
+- Secrets only in the OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager); never in SQLite, logs, or the webview after save.
 - Never overwrite user-owned agent config or files; MCP/skill sync is dry-run, approved, backed up, and reversible. Never execute skill scripts. Never run an unapproved MCP server.
-- Do not claim Intel/Apple Silicon support or performance numbers without a recorded run on that hardware.
+- Do not claim Intel/Apple Silicon/Linux/Windows support or performance numbers without a recorded run on that hardware (CI alone is not evidence).
+- Keep OS differences in `crates/core/src/platform.rs` or behind `cfg`; do not add Unix-only APIs (`libc`, `PermissionsExt`, `/bin/...`) outside it.
 - Do not assume an agent's config format or skill directory; verify against current official docs.
 - Do not claim an agent is waiting for approval/completed unless a reliable adapter signal supports it.
 

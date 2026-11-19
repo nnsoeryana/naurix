@@ -1,7 +1,6 @@
 use super::search::find_executable;
 use super::AgentError;
 use serde::{Deserialize, Serialize};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// Only capabilities that are implemented and tested may be listed (PRD §7).
@@ -168,9 +167,7 @@ pub struct LaunchPlan {
 }
 
 fn is_exec(p: &Path) -> bool {
-    p.metadata()
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    crate::platform::is_executable_file(p)
 }
 
 fn quote_for_display(s: &str) -> String {
@@ -191,7 +188,7 @@ pub fn plan_launch(
     dirs: &[PathBuf],
 ) -> Result<LaunchPlan, AgentError> {
     let program = match path_override {
-        Some(p) if is_exec(Path::new(p)) && p.starts_with('/') => PathBuf::from(p),
+        Some(p) if is_exec(Path::new(p)) && crate::platform::is_absolute_str(p) => PathBuf::from(p),
         Some(p) => {
             return Err(AgentError::Invalid(format!(
                 "'{p}' is not an executable file."
@@ -318,10 +315,12 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn plan_resolves_in_search_dirs_and_builds_a_reviewable_command() {
         let dir = std::env::temp_dir().join(format!("at-plan-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        use std::os::unix::fs::PermissionsExt;
         let exe = dir.join("aider");
         std::fs::write(&exe, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();

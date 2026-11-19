@@ -44,7 +44,7 @@ pub fn detect_version(program: &Path, timeout: Duration) -> Option<String> {
         .map(|l| l.chars().take(200).collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

@@ -41,6 +41,7 @@ pub struct SecurityInfo {
     arch: &'static str,
     data_dir: String,
     keychain_service: &'static str,
+    secret_store: &'static str,
     mcp_servers: usize,
     mcp_approved: usize,
     skills: usize,
@@ -60,6 +61,7 @@ pub async fn security_info(
         arch: info.arch,
         data_dir: dir.0.to_string_lossy().into_owned(),
         keychain_service: naurix_core::mcp::secrets::KEYCHAIN_SERVICE,
+        secret_store: naurix_core::platform::secret_store_name(),
         mcp_approved: servers.iter().filter(|s| s.is_approved()).count(),
         mcp_servers: servers.len(),
         skills: naurix_core::skills::SkillStore::new(&db, &dir.0)
@@ -100,18 +102,16 @@ pub struct PerfSnapshot {
 #[tauri::command]
 pub async fn perf_snapshot(terminals: State<'_, SharedTerminals>) -> Result<PerfSnapshot, String> {
     let pid = std::process::id();
-    let out = std::process::Command::new("/bin/ps")
-        .args(["-o", "rss=", "-p", &pid.to_string()])
-        .output()
-        .map_err(err)?;
-    let rss_mb = String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<f64>()
-        .ok()
-        .map(|kb| (kb / 1024.0 * 10.0).round() / 10.0);
+    let rss_mb = resident_mb(pid);
     Ok(PerfSnapshot {
         pid,
         rss_mb,
         sessions: terminals.session_count(),
     })
+}
+
+/// Resident set size of this process in MB (`None` where the OS offers no cheap reading).
+fn resident_mb(pid: u32) -> Option<f64> {
+    let kb = naurix_core::platform::resident_kb(pid)?;
+    Some((kb / 1024.0 * 10.0).round() / 10.0)
 }

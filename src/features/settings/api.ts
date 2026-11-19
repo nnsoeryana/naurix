@@ -39,6 +39,8 @@ export type SecurityInfo = {
   arch: string;
   dataDir: string;
   keychainService: string;
+  /** Name of the OS credential store (Keychain, Secret Service, Credential Manager). */
+  secretStore: string;
   mcpServers: number;
   mcpApproved: number;
   skills: number;

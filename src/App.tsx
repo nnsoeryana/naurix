@@ -13,7 +13,8 @@ import { SettingsView } from "./features/settings/SettingsView";
 import { SkillsManager } from "./features/skills/SkillsManager";
 import { ContextMenu } from "./features/terminal/ContextMenu";
 import { Sidebar } from "./features/workspaces/Sidebar";
-import { SHORTCUTS, matchShortcut, tabIndexShortcut } from "./shortcuts";
+import { SHORTCUTS, clipboardShortcut, matchShortcut, tabIndexShortcut } from "./shortcuts";
+import { copyPane, pastePane } from "./features/terminal/clipboard";
 import { applyTheme, cacheAppearance } from "./themes/apply";
 import { activeSpace, useStore } from "./state/store";
 
@@ -56,10 +57,17 @@ export default function App() {
       const st = useStore.getState();
       const idx = tabIndexShortcut(e);
       const id = matchShortcut(e);
-      if (idx === null && id === null) return;
+      const clip = clipboardShortcut(e);
+      if (idx === null && id === null && clip === null) return;
       e.preventDefault();
       e.stopPropagation();
       if (st.dialog || st.launcherOpen || st.contextMenu) return; // modal dialogs own the keyboard
+      if (clip) {
+        const sp = activeSpace(st);
+        const pane = sp?.tabs.find((t) => t.id === sp.activeTabId)?.activePaneId;
+        if (pane) (clip === "copy" ? copyPane : pastePane)(pane);
+        return;
+      }
       if (idx !== null) st.selectTabIndex(idx);
       else if (id) runShortcut(id);
     };

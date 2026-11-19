@@ -1,3 +1,4 @@
+#![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! Integration tests: real processes on real PTYs.
 use naurix_core::pty::*;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};

@@ -1,3 +1,4 @@
+#![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! Agent store rules and a mock CLI agent launched through the real PTY supervisor.
 use naurix_core::agents::*;
 use naurix_core::persistence::Db;

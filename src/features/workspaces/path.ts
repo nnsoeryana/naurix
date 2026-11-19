@@ -1,6 +1,9 @@
-/** `/Users/me/Documents/app` -> `~/Documents/app` (macOS home folders live under /Users). */
+/**
+ * `/Users/me/Documents/app` -> `~/Documents/app`. Recognises the usual home folders: `/Users/<name>`
+ * (macOS), `/home/<name>` (Linux) and `C:\Users\<name>` (Windows, either slash style).
+ */
 export function tildePath(p: string): string {
-  return p.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+  return p.replace(/^(?:\/Users\/|\/home\/|[A-Za-z]:[\\/]Users[\\/])[^\\/]+(?=[\\/]|$)/, "~");
 }
 
 /** A tab title like the brand mock-up (`~/workspace`), numbered when the same folder repeats. */

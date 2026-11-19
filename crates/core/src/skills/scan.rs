@@ -5,7 +5,6 @@ use super::frontmatter::{parse, Frontmatter};
 use super::SkillError;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
 pub const MAX_FILES: usize = 2000;
@@ -141,7 +140,7 @@ fn list_files(dir: &Path) -> Result<(Vec<FileEntry>, usize), SkillError> {
                 files.push(FileEntry {
                     rel: rel_child,
                     size: md.len(),
-                    mode: md.permissions().mode(),
+                    mode: crate::platform::file_mode(&md),
                 });
             }
         }
@@ -390,7 +389,7 @@ pub fn slugify(s: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;

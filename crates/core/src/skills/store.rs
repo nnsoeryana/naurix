@@ -7,7 +7,6 @@ use crate::agents::{adapter, Feature, Scope};
 use crate::persistence::{iso8601_utc_now, new_id, Db};
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -580,7 +579,7 @@ impl<'a> SkillStore<'a> {
                 Err(_) => {
                     let created_dir = !dir.exists();
                     std::fs::create_dir_all(&dir).map_err(|e| SkillError::Io(e.to_string()))?;
-                    symlink(&current, &link).map_err(|e| SkillError::Io(e.to_string()))?;
+                    crate::platform::symlink_dir(&current, &link).map_err(SkillError::Io)?;
                     self.record_link(skill_id, agent_id, scope, &link_s, created_dir)?;
                 }
             }
@@ -606,7 +605,8 @@ impl<'a> SkillStore<'a> {
     fn remove_link(&self, l: &SkillLink) -> Result<bool, SkillError> {
         let removed = match self.link_health(l) {
             LinkHealth::Ok => {
-                std::fs::remove_file(&l.link_path).map_err(|e| SkillError::Io(e.to_string()))?;
+                crate::platform::remove_symlink(std::path::Path::new(&l.link_path))
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
                 if l.created_dir {
                     if let Some(parent) = Path::new(&l.link_path).parent() {
                         let _ = std::fs::remove_dir(parent); // only succeeds if empty
@@ -826,8 +826,14 @@ fn canonical_dir(path: &str) -> Result<PathBuf, SkillError> {
 /// Atomically point `<skill dir>/current` at `rev` (a sibling folder), replacing only our own symlink.
 fn point_current(skill_dir: &Path, rev: &str) -> Result<(), SkillError> {
     let tmp = skill_dir.join(format!("current.new-{}", new_id()));
-    symlink(rev, &tmp).map_err(|e| SkillError::Io(e.to_string()))?;
-    std::fs::rename(&tmp, skill_dir.join("current")).map_err(|e| {
+    crate::platform::symlink_dir(Path::new(rev), &tmp).map_err(SkillError::Io)?;
+    let current = skill_dir.join("current");
+    // Windows cannot rename over an existing directory symlink; ours is replaced in two steps.
+    #[cfg(windows)]
+    if std::fs::symlink_metadata(&current).is_ok() {
+        let _ = crate::platform::remove_symlink(&current);
+    }
+    std::fs::rename(&tmp, current).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         SkillError::Io(e.to_string())
     })

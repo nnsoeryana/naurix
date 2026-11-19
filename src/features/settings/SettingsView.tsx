@@ -130,7 +130,7 @@ export function SettingsView() {
         {section === "MCP Integrations" && (
           <>
             <Row label="Servers" hint="Defined once, approved one by one, then written into the agent configs Naurix has verified."><span className="text-xs text-muted">{sec ? `${sec.mcpServers} defined · ${sec.mcpApproved} approved` : "…"}</span></Row>
-            <Row label="Secrets" hint="Tokens and passwords are stored in the macOS Keychain, never in Naurix's database or in agent config files."><span className="font-mono text-xs text-muted">{sec?.keychainService ?? "…"}</span></Row>
+            <Row label="Secrets" hint="Tokens and passwords are stored in the system credential store, never in Naurix's database or in agent config files."><span className="font-mono text-xs text-muted">{sec?.secretStore ?? "…"}</span></Row>
             <div className="pt-4"><button className="btn-primary rounded-lg px-3 py-1 text-xs" onClick={() => setView("mcp")}>Open MCP integrations</button></div>
           </>
         )}
@@ -164,7 +164,7 @@ export function SettingsView() {
             <Row label="Telemetry" hint="There is none. Naurix does not collect usage data, and has no analytics or crash reporting."><span className="text-teal text-xs">Off, and not built in</span></Row>
             <Row label="Network" hint="Naurix itself only uses the network when you ask: downloading a skill from Git, or a server you approved. Nothing runs in the background."><span className="text-xs text-muted">On request only</span></Row>
             <Row label="Data folder" hint="Workspaces, session metadata, settings, MCP definitions and skills. Terminal contents and secrets are never stored here."><span className="break-all font-mono text-xs text-muted" data-data-dir>{sec.dataDir}</span></Row>
-            <Row label="Keychain" hint="Secret values for MCP servers."><span className="font-mono text-xs text-muted">{sec.keychainService}</span></Row>
+            <Row label="Credential store" hint={`Secret values for MCP servers (service ${sec.keychainService}).`}><span className="font-mono text-xs text-muted">{sec.secretStore}</span></Row>
             <Row label="MCP approvals" hint="Withdrawing approvals makes every server inert again until you review it. Nothing is deleted.">
               <div className="flex items-center gap-3"><span className="text-xs text-muted">{sec.mcpApproved} of {sec.mcpServers} approved</span><button className={outline} disabled={sec.mcpApproved === 0} onClick={() => useStore.getState().setDialog({ kind: "confirm", title: "Withdraw all MCP approvals?", message: "Servers stay defined, but none may run or be written to an agent until you approve it again.", confirmLabel: "Withdraw", danger: true, onConfirm: () => void settingsApi.revokeMcpApprovals().then(loadSec).catch(fail) })}>Withdraw all…</button></div>
             </Row>

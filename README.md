@@ -1,10 +1,19 @@
 <p align="center"><img src="assets/naurix-logo.svg" alt="Naurix" width="420"></p>
 
-<p align="center"><b>One workspace. Infinite possibilities.</b><br>An open-source, lightweight terminal and workspace for AI coding agents.<br>macOS (Intel and Apple Silicon) · Apache-2.0</p>
+<p align="center"><b>One workspace. Infinite possibilities.</b><br>An open-source, lightweight terminal and workspace for AI coding agents.<br>macOS (supported) · Linux and Windows (code-complete, not yet validated on real hardware) · Apache-2.0</p>
 
 > **Status: early development (M10 of 11).** You can open project folders as workspaces, run real shells in tabs and split panes, and launch AI coding CLIs (Claude Code, Codex, Gemini CLI, Antigravity CLI, OpenCode, or your own). MCP servers can be managed and synced to Claude Code and OpenCode, skills can be installed and linked into agents, and you can see your repository's Git status. Settings are available (⌘,) (see [Roadmap](#roadmap)).
 
 Naurix (formerly *Agent Terminal*) is meant to run normal shells and AI coding CLIs (Claude Code, Codex, Gemini CLI, OpenCode, custom) side by side, per project. It is not an agent, an IDE, or a hosted service. Everything stays on your machine.
+
+## Linux and Windows (experimental)
+
+The code paths for Linux and Windows exist (ADR 0021) but **nothing is claimed to work** until a recorded run on real hardware is in [docs/PERFORMANCE_AND_COMPATIBILITY.md](docs/PERFORMANCE_AND_COMPATIBILITY.md). CI builds and runs the automated tests on macOS, Ubuntu and Windows.
+
+- **Linux:** install the Tauri prerequisites (`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev pkg-config`), then `./run.sh doctor`, `./run.sh` (dev) or `./run.sh bundle` (`.deb`, `.rpm`, `.AppImage`). Secrets need a running Secret Service keyring (GNOME Keyring or KWallet).
+- **Windows:** install Rust (MSVC toolchain), Node 22+, pnpm and the WebView2 runtime, then in PowerShell: `pnpm install`, `pnpm tauri dev` or `pnpm tauri build` (`.msi`, NSIS `.exe`). `run.sh` is bash-only. Linking a skill into an agent folder uses symlinks, which need **Developer Mode** on Windows.
+- **Shortcuts:** Cmd on macOS; **Ctrl+Shift** on Linux and Windows (so Ctrl+C/W/D stay with the shell): Ctrl+Shift+T new tab, Ctrl+Shift+D split, Ctrl+Shift+C / V copy and paste. Shown in the UI.
+- **Known gaps:** no Windows memory reading in Settings; agent config locations are verified on macOS only; no signing or notarization on any OS.
 
 ## Quick start
 
@@ -42,7 +51,7 @@ Something missing? `./run.sh doctor` prints the exact command to install it. The
 | Launch Claude Code / Codex / Gemini CLI / OpenCode / custom CLI agents, with command review, install detection and an executable path override | ✅ |
 | Agent session list in the sidebar, stop agent, honest process-only status | ✅ |
 | Per-agent capability list, version, and deprecation notices, each marked *verified* or *documented only* ([matrix](docs/AGENT_ADAPTERS.md)) | ✅ |
-| **MCP Integrations**: add servers (catalog or manual), secrets in the macOS Keychain, explicit approval, test connection, preview / apply / undo sync to agent configs | ✅ |
+| **MCP Integrations**: add servers (catalog or manual), secrets in the OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager), explicit approval, test connection, preview / apply / undo sync to agent configs | ✅ |
 | **Git status** (read-only): branch, ahead/behind, changed files, conflicts, stash, diff, "Open in terminal" at the repo root | ✅ |
 | **Settings** (⌘,): general, appearance (9 themes, light/dark/system, accent), terminal (font, scrollback, cursor, shell, renderer), agents, MCP, skills, performance, security | ✅ |
 | Apple Silicon validation (arm64 runs on real hardware) | ⏳ M11a |
@@ -125,7 +134,7 @@ Open the `.dmg` and drag **Naurix** into **Applications**. Notes:
 | ⇧⌘R | Rename tab (also: double-click the tab) |
 | ⇧⌘A | Launch an AI agent |
 
-**Right-click a terminal** for a menu: *Copy*, *Paste*, *Split Right / Left / Up / Down* and *Close Pane*. (⌘C / ⌘V work as usual; the menu's Paste reads the macOS clipboard only when you choose it, up to 1 MiB.)
+**Right-click a terminal** for a menu: *Copy*, *Paste*, *Split Right / Left / Up / Down* and *Close Pane*. (⌘C / ⌘V on macOS, Ctrl+Shift+C / V on Linux and Windows; the menu's Paste reads the system clipboard only when you choose it, up to 1 MiB.)
 
 Shortcuts are defined in `src/shortcuts.ts`. Note that ⌘K opens the palette, so it does not clear the screen as in some terminals (use `clear` or Ctrl-L).
 
@@ -157,7 +166,7 @@ Prompts such as Powerlevel10k draw their icons (the Apple logo, folder icon, `` 
 Open **MCP** in the sidebar (or ⌘K → *MCP integrations*).
 
 1. **Add a server**: *Add from catalog…* (Filesystem, GitHub, PostgreSQL, Playwright, Context7, Sentry, with settings copied from each project's docs) or *Add manually…*. Nothing runs yet.
-2. **Secrets** (tokens, passwords, connection strings): never type them into the command, arguments, environment or header fields. Declare a secret name, write `${secret:NAME}` where it goes (for example `Authorization: Bearer ${secret:GITHUB_PAT}`), then use **Set value…** on the server card. The value is stored in the **macOS Keychain**; it is never written to Naurix's database or to agent config files, and no screen shows it again. Plain-text credentials are refused.
+2. **Secrets** (tokens, passwords, connection strings): never type them into the command, arguments, environment or header fields. Declare a secret name, write `${secret:NAME}` where it goes (for example `Authorization: Bearer ${secret:GITHUB_PAT}`), then use **Set value…** on the server card. The value is stored in the **OS credential store** (macOS Keychain, Linux Secret Service, Windows Credential Manager); it is never written to Naurix's database or to agent config files, and no screen shows it again. Plain-text credentials are refused.
 3. **Review & approve**: shows the exact command (or URL) and what it will receive. Approval is tied to that exact definition; editing the command, arguments, URL, environment or headers asks again. Commands like `npx` also warn that they download and run a package.
 4. **Test connection** (local servers): starts the approved command, asks the server for its tools, then stops it. Remote servers cannot be tested from Naurix yet; the agent that connects to them tests them.
 5. **Sync to agents**: pick an agent → *Preview changes…* → *Apply…*. Naurix shows exactly which entries it will add, update or remove, backs the file up first, and keeps an **Undo**. It only touches entries it wrote. If you already have an entry with the same name, or you edited one of Naurix's, it is left alone and reported as a conflict. Today this works for **Claude Code** (the project's `.mcp.json`) and **OpenCode** (`~/.config/opencode/opencode.json[c]` in the flat `mcp.<name>` layout). If that file has comments, Naurix will not rewrite it and shows you the entries to paste instead.
@@ -227,7 +236,7 @@ cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check
 Layout:
 
 ```
-crates/core/   Rust, no Tauri dependency: pty/ (sessions, supervisor, flow control), persistence/ (SQLite), agents/ (presets, search, launch planning, verified adapter facts), mcp/ (registry, Keychain, probe, sync), skills/ (store, git fetch, scan, links), git/ (hardened read-only status and diff)
+crates/core/   Rust, no Tauri dependency: pty/ (sessions, supervisor, flow control), persistence/ (SQLite), agents/ (presets, search, launch planning, verified adapter facts), mcp/ (registry, OS credential store, probe, sync), platform.rs (the few OS differences), skills/ (store, git fetch, scan, links), git/ (hardened read-only status and diff)
 src-tauri/     Thin Tauri shell: commands validate input and delegate to core
 src/           React + TypeScript + Tailwind: features/{workspaces,tabs,layout,terminal,agents,mcp,skills,git,settings,palette}, state/store.ts
 bench/         Memory/CPU measurement harness and recorded results

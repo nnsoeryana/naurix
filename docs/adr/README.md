@@ -5,7 +5,7 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 
 | ADR | Title | Status |
 |---|---|---|
-| [0001](0001-platform-scope.md) | Platform scope: macOS x86_64 + arm64 | Accepted |
+| [0001](0001-platform-scope.md) | Platform scope: macOS x86_64 + arm64 | Accepted (Windows/Linux clause superseded by 0021) |
 | [0002](0002-core-crate-split.md) | Framework-independent `core` crate + thin Tauri shell | Accepted |
 | [0003](0003-central-registry-with-sync-adapters.md) | Central registry + per-agent sync adapters (MCP, Skills) | Accepted |
 | [0004](0004-secrets-in-keychain.md) | Secrets live in macOS Keychain only | Accepted |
@@ -23,4 +23,6 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0016](0016-skills-manager.md) | Skills manager: central store, symlink links, untrusted content | Accepted |
 | [0017](0017-git-status.md) | Read-only Git status, hardened against hostile repositories | Accepted |
 | [0018](0018-settings-and-performance-budgets.md) | Settings model and performance budgets | Accepted |
+| [0019](0019-no-credential-storage.md) | Naurix stores no credentials | Accepted (partially implemented) |
 | [0020](0020-theme-system.md) | Theme system | Accepted |
+| [0021](0021-windows-linux-readiness.md) | Windows and Linux readiness | Accepted (implemented, unvalidated) |

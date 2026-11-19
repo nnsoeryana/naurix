@@ -1,5 +1,5 @@
 import { IconBolt, IconFolder, IconGear, IconGit, IconHome, IconPencil, IconPlug, IconPlus, IconClose } from "../../components/icons";
-import { SHORTCUTS } from "../../shortcuts";
+import { IS_MAC, SHORTCUTS } from "../../shortcuts";
 import { useStore } from "../../state/store";
 import markUrl from "../../assets/naurix-mark.svg";
 import { AgentSessions } from "../agents/AgentSessions";
@@ -19,8 +19,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-sidebar">
-      {/* The window uses an overlay title bar: this strip sits under the traffic lights and drags the window. */}
-      <div data-tauri-drag-region className="h-10 shrink-0" />
+      {/* macOS uses an overlay title bar: this strip sits under the traffic lights and drags the window.
+          Linux and Windows keep the native title bar, so no spacer is needed. */}
+      {IS_MAC ? <div data-tauri-drag-region className="h-10 shrink-0" /> : <div className="h-3 shrink-0" />}
       <div className="flex items-center gap-2.5 px-4 pb-4">
         <img src={markUrl} alt="" className="h-6 w-auto" />
         <span className="text-xl font-semibold tracking-tight">Naurix</span>

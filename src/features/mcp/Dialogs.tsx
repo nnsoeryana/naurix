@@ -105,7 +105,7 @@ export function EditorDialog({ initial, isNew, onSave, onClose }: { initial: Mcp
           <input className={`${field} mt-1 font-mono`} value={secrets} onChange={(e) => setSecrets(e.target.value)} placeholder="GITHUB_PAT" />
         </label>
         <p className="mt-1 text-[11px] text-faint">
-          Never type a token or password into the fields above. Declare a secret, write <code>{"${secret:NAME}"}</code> where it belongs (for example <code>Authorization: Bearer {"${secret:GITHUB_PAT}"}</code>), then set its value on the server card. The value is kept in the macOS Keychain.
+          Never type a token or password into the fields above. Declare a secret, write <code>{"${secret:NAME}"}</code> where it belongs (for example <code>Authorization: Bearer {"${secret:GITHUB_PAT}"}</code>), then set its value on the server card. The value is kept in the system credential store (Keychain, Secret Service or Credential Manager).
         </p>
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
@@ -126,7 +126,7 @@ export function ApprovalDialog({ server, onApprove, onClose }: { server: McpServ
       <dl className="mb-3 space-y-1 text-xs text-muted">
         {server.env.length > 0 && <div><dt className="inline text-faint">Environment: </dt><dd className="inline font-mono">{server.env.map((e) => `${e.name}=${e.value}`).join(", ")}</dd></div>}
         {server.headers.length > 0 && <div><dt className="inline text-faint">Headers: </dt><dd className="inline font-mono">{server.headers.map((h) => `${h.name}: ${h.value}`).join(", ")}</dd></div>}
-        {server.secrets.length > 0 && <div><dt className="inline text-faint">Secrets (values stay in the Keychain): </dt><dd className="inline font-mono">{server.secrets.map((s) => s.name).join(", ")}</dd></div>}
+        {server.secrets.length > 0 && <div><dt className="inline text-faint">Secrets (values stay in the system keyring): </dt><dd className="inline font-mono">{server.secrets.map((s) => s.name).join(", ")}</dd></div>}
       </dl>
       {server.command && ["npx", "bunx", "pnpm", "uvx", "pipx"].some((c) => server.command === c || server.command?.endsWith(`/${c}`)) && (
         <p className="mb-3 rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning">This command downloads and runs a package from the internet. Only approve servers you trust.</p>
