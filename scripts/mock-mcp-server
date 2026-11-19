@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""A tiny scripted MCP server over stdio (newline-delimited JSON-RPC) for tests and the smoke run.
+It reports whether it received the secret in its environment, without ever printing the secret."""
+import json, os, sys
+
+TOOLS = [{"name": "echo", "description": "Echo text back", "inputSchema": {"type": "object", "properties": {}}},
+         {"name": "time", "description": "Current time", "inputSchema": {"type": "object", "properties": {}}}]
+got = bool(os.environ.get("API_TOKEN"))
+if os.environ.get("MOCK_LOG"):
+    open(os.environ["MOCK_LOG"], "a").write("server started; API_TOKEN length=%d\n" % len(os.environ.get("API_TOKEN", "")))
+for line in sys.stdin:
+    try:
+        m = json.loads(line)
+    except ValueError:
+        continue
+    if m.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+              "serverInfo": {"name": "mock-mcp", "version": "token-received" if got else "no-token"}}}), flush=True)
+    elif m.get("method") == "tools/list":
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"tools": TOOLS}}), flush=True)

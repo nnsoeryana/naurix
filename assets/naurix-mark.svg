@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="14 24 740 400" role="img" aria-label="Naurix">
+  <defs>
+    <linearGradient id="nx-top" gradientUnits="userSpaceOnUse" x1="60" y1="330" x2="720" y2="120">
+      <stop offset="0" stop-color="#A47CFF"/>
+      <stop offset="0.38" stop-color="#8B7CFF"/>
+      <stop offset="0.62" stop-color="#5E9BF2"/>
+      <stop offset="1" stop-color="#39E6D8"/>
+    </linearGradient>
+    <linearGradient id="nx-fold" gradientUnits="userSpaceOnUse" x1="120" y1="200" x2="580" y2="400">
+      <stop offset="0" stop-color="#5B3FD8"/>
+      <stop offset="0.55" stop-color="#4A62E6"/>
+      <stop offset="1" stop-color="#2FC9DD"/>
+    </linearGradient>
+    <linearGradient id="nx-edge" gradientUnits="userSpaceOnUse" x1="200" y1="100" x2="560" y2="360">
+      <stop offset="0" stop-color="#E6DDFF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#BDF7F1" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <!-- silhouette: light upper sheet -->
+  <path fill="url(#nx-top)" d="M28 372 C100 330 140 160 215 78 C245 48 280 38 320 42 C380 48 430 110 470 175 C505 232 540 250 570 232 C612 206 650 120 742 52 C690 100 660 300 575 372 C520 418 440 388 410 350 C360 285 300 232 250 236 C190 240 110 330 28 372 Z"/>
+  <!-- darker folded underside -->
+  <path fill="url(#nx-fold)" d="M28 372 C100 335 140 190 195 125 C225 98 255 100 285 118 C350 160 410 270 470 335 C500 365 540 372 578 358 C540 408 450 402 410 350 C360 285 300 232 250 236 C190 240 110 330 28 372 Z"/>
+  <!-- fold highlight -->
+  <path fill="none" stroke="url(#nx-edge)" stroke-width="3.5" stroke-linecap="round" d="M195 125 C225 98 255 100 285 118 C350 160 410 270 470 335 C500 365 540 372 578 358"/>
+</svg>

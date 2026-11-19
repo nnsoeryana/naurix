@@ -1,0 +1,133 @@
+{
+  "label": "m10-idle-blink-on-run1",
+  "arch": "x64",
+  "cpu": "Intel(R) Core(TM) i5-8257U CPU @ 1.40GHz",
+  "macos": "14.6",
+  "binary": "target/release/naurix",
+  "seconds": 30,
+  "interval": 2,
+  "median": {
+    "totalRssMB": 136.5,
+    "totalFootprintMB": 79.8,
+    "cpuPct": 0.1
+  },
+  "samples": [
+    {
+      "t": "2026-11-19T08:51:29.750Z",
+      "processes": 4,
+      "mainRssMB": 43,
+      "helpersRssMB": 92.1,
+      "totalRssMB": 135.1,
+      "totalFootprintMB": 82.4,
+      "cpuPct": 35.5
+    },
+    {
+      "t": "2026-11-19T08:51:32.142Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 83.4,
+      "cpuPct": 0.6
+    },
+    {
+      "t": "2026-11-19T08:51:34.456Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 80,
+      "cpuPct": 0
+    },
+    {
+      "t": "2026-11-19T08:51:36.771Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 79.9,
+      "cpuPct": 0.1
+    },
+    {
+      "t": "2026-11-19T08:51:39.098Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.2,
+      "totalRssMB": 136.3,
+      "totalFootprintMB": 79.7,
+      "cpuPct": 0
+    },
+    {
+      "t": "2026-11-19T08:51:41.408Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93,
+      "totalRssMB": 136.1,
+      "totalFootprintMB": 77.4,
+      "cpuPct": 0.1
+    },
+    {
+      "t": "2026-11-19T08:51:43.720Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.2,
+      "totalRssMB": 136.4,
+      "totalFootprintMB": 79.8,
+      "cpuPct": 13.3
+    },
+    {
+      "t": "2026-11-19T08:51:46.025Z",
+      "processes": 4,
+      "mainRssMB": 43.3,
+      "helpersRssMB": 93.5,
+      "totalRssMB": 136.7,
+      "totalFootprintMB": 83.1,
+      "cpuPct": 0.9
+    },
+    {
+      "t": "2026-11-19T08:51:48.384Z",
+      "processes": 4,
+      "mainRssMB": 43.3,
+      "helpersRssMB": 93.5,
+      "totalRssMB": 136.7,
+      "totalFootprintMB": 82,
+      "cpuPct": 0.1
+    },
+    {
+      "t": "2026-11-19T08:51:50.682Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.4,
+      "totalRssMB": 136.6,
+      "totalFootprintMB": 75.9,
+      "cpuPct": 0
+    },
+    {
+      "t": "2026-11-19T08:51:52.977Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 75.8,
+      "cpuPct": 0
+    },
+    {
+      "t": "2026-11-19T08:51:55.346Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 75.7,
+      "cpuPct": 0
+    },
+    {
+      "t": "2026-11-19T08:51:57.661Z",
+      "processes": 4,
+      "mainRssMB": 43.2,
+      "helpersRssMB": 93.3,
+      "totalRssMB": 136.5,
+      "totalFootprintMB": 75.7,
+      "cpuPct": 0
+    }
+  ]
+}
