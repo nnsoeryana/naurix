@@ -1,5 +1,7 @@
 <p align="center"><img src="assets/naurix-logo.svg" alt="Naurix" width="420"></p>
 
+<p align="center"><a href="https://naurix.nana-dev.web.id/">Website</a> · <a href="docs/">Docs</a> · <a href="CONTRIBUTING.md">Contributing</a></p>
+
 <p align="center"><b>One workspace. Infinite possibilities.</b><br>An open-source, lightweight terminal and workspace for AI coding agents.<br>macOS (supported) · Linux and Windows (code-complete, not yet validated on real hardware) · Apache-2.0</p>
 
 > **Status: early development (M10 of 11).** You can open project folders as workspaces, run real shells in tabs and split panes, and launch AI coding CLIs (Claude Code, Codex, Gemini CLI, Antigravity CLI, OpenCode, or your own). MCP servers can be managed and synced to Claude Code and OpenCode, skills can be installed and linked into agents, and you can see your repository's Git status. Settings are available (⌘,) (see [Roadmap](#roadmap)).
