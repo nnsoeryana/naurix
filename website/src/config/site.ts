@@ -46,7 +46,7 @@ export const primaryCta = urls.release
   ? { label: "Download Naurix", href: urls.release, download: true }
   : { label: "Build from source", href: urls.buildFromSource, download: false };
 
-/** Hero product screenshot (compressed WebP; the original PNG is kept in `design/`). `null` shows the placeholder. */
+/** Hero product screenshot (compressed WebP). `null` shows the placeholder. */
 export const screenshot: { src: string; alt: string; width: number; height: number } | null = {
   src: "/screenshots/app.webp",
   alt: "Naurix desktop workspace: a project sidebar, a Claude Code session on the left and a terminal running pnpm dev on the right.",

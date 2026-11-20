@@ -2,17 +2,17 @@ import { expect, test } from "vitest";
 import { tildePath, uniqueTitle } from "./path";
 
 test("home folders become ~", () => {
-  expect(tildePath("/Users/lion/Documents/proj")).toBe("~/Documents/proj");
-  expect(tildePath("/Users/lion")).toBe("~");
+  expect(tildePath("/Users/alice/Documents/proj")).toBe("~/Documents/proj");
+  expect(tildePath("/Users/alice")).toBe("~");
   expect(tildePath("/private/tmp/x")).toBe("/private/tmp/x");
-  expect(tildePath("/Users/lionel/x")).toBe("~/x");
+  expect(tildePath("/Users/alicia/x")).toBe("~/x");
 });
 
 test("Linux and Windows home folders become ~", () => {
-  expect(tildePath("/home/nana/code/app")).toBe("~/code/app");
-  expect(tildePath("/home/nana")).toBe("~");
-  expect(tildePath("C:\\Users\\nana\\code")).toBe("~\\code");
-  expect(tildePath("C:/Users/nana/code")).toBe("~/code");
+  expect(tildePath("/home/alice/code/app")).toBe("~/code/app");
+  expect(tildePath("/home/alice")).toBe("~");
+  expect(tildePath("C:\\Users\\alice\\code")).toBe("~\\code");
+  expect(tildePath("C:/Users/alice/code")).toBe("~/code");
   expect(tildePath("D:\\work\\app")).toBe("D:\\work\\app");
 });
 

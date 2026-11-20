@@ -288,7 +288,7 @@ The interface follows the Naurix brand system (`assets/brand/naurix-brand-system
 | Midnight | `#0B1020` | app and terminal background |
 | Cloud White | `#F4F7FF` | primary text |
 
-Tokens live in `src/index.css`; the terminal palette in `src/features/terminal/theme.ts`. The logo and app icon are vector files in `assets/` (`naurix-mark.svg`, `naurix-logo.svg`, `naurix-icon.svg`); they are my redraw of the mark from the brand sheet, so swap in your own master SVG there if you have one, then regenerate the icons: `pnpm dlx sharp-cli -i assets/naurix-icon.svg -o assets/naurix-icon-1024.png resize 1024 1024 && pnpm tauri icon assets/naurix-icon-1024.png` (delete the `android/` and `ios/` folders it creates inside `src-tauri/icons`).
+Tokens live in `src/index.css`; the terminal palette in `src/features/terminal/theme.ts`. The logo and app icon are vector files in `assets/` (`naurix-mark.svg`, `naurix-logo.svg`, `naurix-icon.svg`); they are a redraw of the mark from the brand sheet; replace them with the master SVG if you have one, then regenerate the icons: `pnpm dlx sharp-cli -i assets/naurix-icon.svg -o assets/naurix-icon-1024.png resize 1024 1024 && pnpm tauri icon assets/naurix-icon-1024.png` (delete the `android/` and `ios/` folders it creates inside `src-tauri/icons`).
 
 **Upgrading from the old name:** your workspaces and settings are moved automatically from `dev.agentterminal.app` to `dev.naurix.app` the first time Naurix starts.
 
