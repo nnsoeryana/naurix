@@ -12,8 +12,8 @@ export const site = {
     "Naurix is an open-source, lightweight terminal and workspace for AI coding agents. Manage terminals, agents, MCP integrations and skills in one place, locally, on macOS.",
   year: new Date().getFullYear(),
   license: "Apache-2.0",
-  /** Public origin of the website. Set NEXT_PUBLIC_SITE_URL when deployed; leave unset for none. */
-  origin: process.env.NEXT_PUBLIC_SITE_URL ?? null,
+  /** Public origin of the website (override with NEXT_PUBLIC_SITE_URL, e.g. for previews). */
+  origin: process.env.NEXT_PUBLIC_SITE_URL ?? "https://naurix.nana-dev.web.id",
 } as const;
 
 export const urls = {

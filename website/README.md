@@ -36,5 +36,5 @@ TypeScript is pinned to 6.x because `typescript-eslint` does not support 7.x yet
 - Real app screenshot: add `public/screenshots/app.png`, set `screenshot` in `site.ts` (placeholder shows until then).
 - Release/download URL (`urls.release`).
 - Docs site URL, if one is created (currently links to `docs/` on GitHub).
-- Production origin: set `NEXT_PUBLIC_SITE_URL` to enable absolute Open Graph URLs; add an Open Graph image.
+- Production origin defaults to `https://naurix.nana-dev.web.id` (override with `NEXT_PUBLIC_SITE_URL`). Still needed: an Open Graph image.
 - Confirm the GitHub repo is public (links assume `github.com/nnsoeryana/naurix`, `main`).
