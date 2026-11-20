@@ -1,0 +1,83 @@
+/* Aurora motion. Only transform + opacity animate. Static state must look finished. */
+
+@keyframes aurora-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(4%, -3%, 0) rotate(3deg); }
+}
+@keyframes aurora-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(-5%, 4%, 0) rotate(-4deg); }
+}
+@keyframes aurora-sway-a {
+  0%, 100% { transform: translate3d(-2%, 0, 0) skewX(-8deg) scaleY(1); opacity: 0.55; }
+  50% { transform: translate3d(5%, 2%, 0) skewX(6deg) scaleY(1.12); opacity: 0.95; }
+}
+@keyframes aurora-sway-b {
+  0%, 100% { transform: translate3d(3%, 0, 0) skewX(7deg) scaleY(1.05); opacity: 0.9; }
+  50% { transform: translate3d(-6%, -2%, 0) skewX(-5deg) scaleY(0.95); opacity: 0.5; }
+}
+@keyframes aurora-sway-c {
+  0%, 100% { transform: translate3d(0, 0, 0) skewX(4deg); opacity: 0.35; }
+  35% { opacity: 0.8; }
+  50% { transform: translate3d(8%, 1%, 0) skewX(-7deg); }
+  75% { opacity: 0.45; }
+}
+@keyframes naurix-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+@keyframes naurix-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.08); }
+}
+@keyframes naurix-sway {
+  0%, 100% { transform: translateX(0) skewX(0deg); }
+  50% { transform: translateX(10px) skewX(-2deg); }
+}
+@keyframes naurix-flow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -420; }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes shot-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.aurora-a { animation: aurora-drift-a 24s ease-in-out infinite; }
+.aurora-b { animation: aurora-drift-b 30s ease-in-out infinite; }
+/* Curtains fade out toward top and bottom so they read as light, not shapes. */
+.aurora-curtain {
+  /* Bright lower edge that fades upward, like a real curtain of light. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.35) 35%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.35) 35%, #000 70%, transparent 100%);
+  transform-origin: 50% 0;
+  mix-blend-mode: screen;
+  filter: blur(10px);
+}
+.aurora-curtain-a { animation: aurora-sway-a 16s ease-in-out infinite; }
+.aurora-curtain-b { animation: aurora-sway-b 21s ease-in-out -6s infinite; }
+.aurora-curtain-c { animation: aurora-sway-c 13s ease-in-out -3s infinite; }
+.naurix-float { animation: naurix-float 9s ease-in-out infinite; }
+.naurix-breathe { transform-origin: center; animation: naurix-breathe 7s ease-in-out infinite; }
+.naurix-sway-1 { animation: naurix-sway 11s ease-in-out infinite; }
+.naurix-sway-2 { animation: naurix-sway 14s ease-in-out -4s infinite reverse; }
+.naurix-flow { stroke-dasharray: 140 280; animation: naurix-flow 12s linear infinite; }
+.shot-in { animation: shot-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Scroll reveal: content is visible by default; only hidden once JS has marked it. */
+.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* Pause continuous animations when the tab is hidden (set by the Reveal client component). */
+.paused * { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-a, .aurora-b, .aurora-curtain, .naurix-float, .naurix-breathe, .naurix-sway-1, .naurix-sway-2, .naurix-flow, .shot-in {
+    animation: none !important;
+  }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+}
