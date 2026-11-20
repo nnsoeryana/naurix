@@ -211,6 +211,7 @@ Press **⌘,** or open **Settings** in the sidebar. Changes are checked by the b
 
 - Typing `exit` (code 0) closes a shell pane (agent panes stay open so you can read their last output). A non-zero exit or a killed process keeps the pane open with **Restart** / **Close** buttons so you can see what happened.
 - A shell started by an app uses `$SHELL -l` (a *login* shell). If your shell startup is slow (e.g. heavy `.zshrc`, nvm), the first prompt can appear late; commands you type meanwhile run once startup finishes. That is your shell config, not the app.
+- macOS may ask “Naurix would like to access files in your Downloads (or Documents, Desktop) folder”. Naurix itself does not read those folders. Shells and agents run as child processes of the app, so macOS attributes their file access to Naurix. The prompt appears when something in a terminal (a command, an agent, a drag-and-drop path you then open) first touches that folder. **Don't Allow** is safe; only access to that folder is denied. Change it later in System Settings → Privacy & Security → Files and Folders.
 - Hidden tabs keep running and keep their scrollback. Terminals are stopped when you close them, remove their workspace, or quit the app.
 
 ### Where your data lives, and how to reset
@@ -232,6 +233,7 @@ rm -rf ~/Library/Application\ Support/dev.naurix.app              # reset everyt
 | `Port 1420 is already in use` | Another dev instance is running: `pkill -f "tauri dev"; pkill -f vite` |
 | Blank window in dev | Wait for the Vite server; check the terminal running `pnpm tauri dev` for errors |
 | First prompt takes many seconds | Your login shell is slow to start; time it with `time zsh -l -i -c exit` |
+| macOS asks for access to Downloads/Documents/Desktop | Expected when a shell or agent in a terminal touches that folder; see [Behaviors worth knowing](#behaviors-worth-knowing) |
 | "App is damaged / can't be opened" on another Mac | The app is unsigned: right-click → Open, or `xattr -dr com.apple.quarantine "Naurix.app"` |
 
 ## Develop
