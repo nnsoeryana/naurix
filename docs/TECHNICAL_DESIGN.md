@@ -96,7 +96,7 @@ Decision gate:
 ### Workspace layout (ADR 0002)
 
 ```text
-crates/core/      # no Tauri dependency: domain, pty, supervisor, adapters, mcp, skills, git, persistence
+crates/core/      # no Tauri dependency: domain, pty, supervisor, session (SessionManager, ADR 0023), adapters, mcp, skills, git, persistence
 src-tauri/        # command handlers (validate, delegate), events, capabilities
 src/              # React UI
 bench/            # RSS/CPU benchmark harness

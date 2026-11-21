@@ -32,7 +32,7 @@ Before implementing:
 
 - Keep process execution and PTY management in Rust.
 - Keep domain logic independent from React and Tauri command handlers.
-- Tauri commands validate input and delegate to services. `src-tauri` is the bridge: lifecycle and business logic (session start, persistence updates, approvals) belong in `crates/core`. Known debt: `start_session`/`Terminals` in `src-tauri/src/terminal.rs` still own session start; moving it to Core is the first orchestration stage, done without changing terminal behaviour.
+- Tauri commands validate input and delegate to services. `src-tauri` is the bridge: lifecycle and business logic (session start, persistence updates, approvals) belong in `crates/core`. Session start and lifecycle live in `crates/core/src/session` (`SessionManager`, ADR 0023); `src-tauri/src/terminal.rs` only adapts it to Tauri channels.
 - Use executable + argument arrays; do not build shell command strings from user input.
 - Keep terminal output out of React global state. Write output to the terminal renderer through refs and bounded event streams.
 - Use migrations for SQLite schema changes.
