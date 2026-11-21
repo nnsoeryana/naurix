@@ -3,6 +3,7 @@
 
 use super::frontmatter::{parse, Frontmatter};
 use super::SkillError;
+use crate::agents::{agent_adapters, SkillFacts};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
@@ -200,55 +201,22 @@ fn looks_like_script(f: &FileEntry, head: &[u8]) -> bool {
 }
 
 pub(crate) fn compat(fm: &Frontmatter) -> Vec<Compat> {
-    let (name, desc) = (fm.get("name").is_some(), fm.get("description").is_some());
-    let c = |agent_id, status, note: &str| Compat {
-        agent_id,
-        status,
-        note: note.into(),
+    let facts = SkillFacts {
+        has_name: fm.get("name").is_some(),
+        has_description: fm.get("description").is_some(),
     };
-    vec![
-        c(
-            "claude-code",
-            "ok",
-            if desc {
-                "Name defaults to the folder; description is used to decide when to apply it."
-            } else {
-                "No description: Claude falls back to the first line of the file."
-            },
-        ),
-        if name && desc {
-            c("codex", "ok", "Has the required `name` and `description`.")
-        } else {
-            c(
-                "codex",
-                "needs_fix",
-                "Codex requires `name` and `description` in the front matter.",
-            )
-        },
-        if desc {
-            c(
-                "opencode",
-                "ok",
-                "Has a description, so it is advertised to the model.",
-            )
-        } else {
-            c(
-                "opencode",
-                "needs_fix",
-                "Without a description OpenCode does not advertise the skill to the model.",
-            )
-        },
-        c(
-            "antigravity-cli",
-            "unknown",
-            "Antigravity's skill requirements were not found in the documentation read.",
-        ),
-        c(
-            "gemini-cli",
-            "unsupported",
-            "No documented skills folder for Gemini CLI itself.",
-        ),
-    ]
+    // Per-agent rules live in each agent's adapter (ADR 0025).
+    agent_adapters()
+        .iter()
+        .map(|a| {
+            let r = a.skill_compat(facts);
+            Compat {
+                agent_id: a.info().agent_id,
+                status: r.status,
+                note: r.note.into(),
+            }
+        })
+        .collect()
 }
 
 /// Inspect one skill folder without modifying or executing anything.

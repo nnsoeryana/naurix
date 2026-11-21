@@ -5,6 +5,7 @@
 //! capability advertised is `pty_launch`; process state is the only status we can know.
 
 mod adapter;
+mod behavior;
 mod def;
 mod search;
 mod store;
@@ -13,6 +14,9 @@ mod version;
 pub use adapter::{
     adapter, all_adapters, detect_presence, AdapterInfo, CapabilityInfo, ConfigPath, Feature,
     Level, Presence, Scope,
+};
+pub use behavior::{
+    adapter_for, agent_adapters, AgentAdapter, McpFileFormat, McpTarget, SkillCompat, SkillFacts,
 };
 pub use def::{
     plan_launch, validate_custom, AgentCapability, AgentDef, AgentKind, CustomAgent, EnvVar,

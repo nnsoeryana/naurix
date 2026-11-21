@@ -7,7 +7,7 @@
 use super::model::{expand, secret_env_var, McpServer, Transport};
 use super::store::McpStore;
 use super::McpError;
-use crate::agents::{adapter, Feature};
+use crate::agents::{adapter_for, Feature, McpFileFormat as Shape, McpTarget};
 use crate::persistence::{iso8601_utc_now, new_id};
 use rusqlite::params;
 use serde::Serialize;
@@ -76,10 +76,19 @@ fn sha(bytes: &[u8]) -> String {
         .collect()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Shape {
-    Claude,
-    OpenCode,
+/// The config file and layout Naurix manages for an agent, if M6 verified one. Which file and
+/// layout belong to which agent is the adapter's business (ADR 0025); this only enforces the gate.
+fn target(agent_id: &str, workspace_root: &Path, home: &Path) -> Result<McpTarget, McpError> {
+    let a = adapter_for(agent_id)
+        .ok_or_else(|| McpError::Sync(format!("{agent_id} has no adapter.")))?;
+    if !a.info().acts_on(Feature::McpConfig) {
+        return Err(McpError::Sync(
+            "Syncing MCP servers to this agent is not verified yet (see docs/AGENT_ADAPTERS.md)."
+                .into(),
+        ));
+    }
+    a.mcp_target(workspace_root, home)
+        .ok_or_else(|| McpError::Sync(format!("No MCP target for {agent_id}.")))
 }
 
 /// The config file Naurix manages for an agent, if M6 verified one.
@@ -88,34 +97,7 @@ pub fn target_path(
     workspace_root: &Path,
     home: &Path,
 ) -> Result<PathBuf, McpError> {
-    let a =
-        adapter(agent_id).ok_or_else(|| McpError::Sync(format!("{agent_id} has no adapter.")))?;
-    if !a.acts_on(Feature::McpConfig) {
-        return Err(McpError::Sync(
-            "Syncing MCP servers to this agent is not verified yet (see docs/AGENT_ADAPTERS.md)."
-                .into(),
-        ));
-    }
-    match agent_id {
-        "claude-code" => Ok(workspace_root.join(".mcp.json")),
-        "opencode" => {
-            let dir = home.join(".config/opencode");
-            Ok(["opencode.jsonc", "opencode.json"]
-                .iter()
-                .map(|f| dir.join(f))
-                .find(|p| p.exists())
-                .unwrap_or_else(|| dir.join("opencode.jsonc")))
-        }
-        other => Err(McpError::Sync(format!("No MCP target for {other}."))),
-    }
-}
-
-fn shape_of(agent_id: &str) -> Shape {
-    if agent_id == "opencode" {
-        Shape::OpenCode
-    } else {
-        Shape::Claude
-    }
+    target(agent_id, workspace_root, home).map(|t| t.path)
 }
 
 fn servers_key(s: Shape) -> &'static str {
@@ -221,14 +203,11 @@ pub fn plan(
     workspace_root: &Path,
     home: &Path,
 ) -> Result<SyncPlan, McpError> {
-    let path = target_path(agent_id, workspace_root, home)?;
-    let shape = shape_of(agent_id);
+    let t = target(agent_id, workspace_root, home)?;
+    let (path, shape) = (t.path, t.format);
     let key = servers_key(shape);
     let path_s = path.to_string_lossy().into_owned();
-    let mut notes = vec![];
-    if shape == Shape::Claude {
-        notes.push("Claude Code will ask you to approve project servers the first time it starts in this folder.".into());
-    }
+    let mut notes: Vec<String> = t.note.map(str::to_string).into_iter().collect();
     notes.push("Secrets are not written to the file. It refers to environment variables that Naurix provides when it launches the agent, so start the agent from Naurix's Agents panel.".into());
 
     let mut p = SyncPlan {
