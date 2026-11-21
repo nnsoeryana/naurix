@@ -69,3 +69,23 @@ Two decisions made while implementing, not in the first draft:
 2. **Titles are sanitised instead of failing the start.** The database rejects titles over 100 characters or with control characters, and the terminal title is derived from the folder path, so a deep path would have made "start fails if the row cannot be recorded" break ordinary terminals. The title is now trimmed, stripped of control characters and truncated (empty becomes "Session"). A genuine database error still fails the start and stops the process.
 
 Behaviour that changed in Core, as intended: an exited session stays in `list()` and can be replayed until closed; a consumer that goes away no longer ends the forwarder or marks the row `exited`; `terminate_workspace` now also forgets the sessions it stops; `SessionStarted` is published before `SessionExited` by a start gate rather than by ordering luck.
+
+**Part (b), Tauri and UI, 2026-11-21.** `src-tauri/src/lifecycle.rs`, `terminal.rs` (`session_list`/`session_attach`/`session_detach`/`session_close`, replacing `terminal_terminate`), `lib.rs`; frontend in `src/features/terminal/` (`api.ts`, `reattach.ts`, `TerminalView.tsx`), `src/state/store.ts`, `PaneTree.tsx`.
+
+Facts checked in the Tauri 2.12.7 / tao 0.37.3 / muda 0.20.0 sources (previously assumptions):
+- Closing the last window emits `ExitRequested` and exits unless prevented; `CloseRequested` can be prevented, so hiding the window keeps the process alive. `RunEvent::Reopen { has_visible_windows }` exists on macOS.
+- The predefined Quit item maps to `NSApp terminate:` and tao only implements `applicationWillTerminate`, so **Cmd+Q could not be intercepted to ask for confirmation**. It is replaced by a custom "Quit Naurix" menu item. The Dock menu's Quit and a system shutdown still use `terminate:`: they cannot ask, and sessions are still terminated gracefully on `RunEvent::Exit`.
+
+Added beyond the first design: attach returns a consumer generation and `detach_if` ignores a stale one (needed because `React.StrictMode` is on and a pane can be mounted, cleaned up and mounted again, and Tauri runs async commands concurrently); `busy_count` so the quit prompt ignores an idle shell; `detach_all` on page load instead of `shutdown`.
+
+**Evidence from the running app** (dev build, sandbox data folder, `NAURIX_SMOKE_VISUAL=reload`): after two real page reloads the same backend session id was found, there was one tab, the printed marker was replayed and the shell answered new input. This run **caught a bug** the unit tests could not: `init()` runs more than once under StrictMode and the first version of reattach added three tabs for one session, leaving two panes without output. Reattach is now idempotent. One earlier run showed a stray extra line in the replayed buffer that two later runs did not reproduce; the cause is not established (Core replay is byte-exact in tests, so a terminal redraw on resize is the likely source) and it is recorded here rather than dismissed.
+
+**Not verified; needs a person on macOS (none of this can be driven from the test harness):**
+1. Red close button hides the window, the agent keeps working, and a Dock click shows the window again with its terminals intact.
+2. Cmd+Q with a running agent shows the confirmation, "Keep running" leaves the app alone, "Quit" stops everything; with only an idle shell it quits without asking; with the setting off it never asks.
+3. Quit with sessions running leaves no orphan processes; killing the Naurix process itself leaves none (Spike D equivalent, still to be written).
+4. Reload with a real agent CLI (Claude Code, OpenCode, Codex) repaints correctly after replay; this is the main known risk of the replay approach.
+5. The macOS-only code is gated by `cfg`; Linux and Windows lint and build were not run locally (no cross toolchain) and are left to CI.
+6. Memory with several detached sessions holding a full 1 MiB buffer has not been benchmarked (ADR 0006).
+
+**Still pending the maintainer:** marking this ADR Accepted, after which PRD gains SES-005 and SES-006 and AGENTS.md gains the "unmount detaches, only an explicit close ends a session" rule.
