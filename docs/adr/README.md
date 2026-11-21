@@ -26,3 +26,4 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0019](0019-no-credential-storage.md) | Naurix stores no credentials | Accepted (partially implemented) |
 | [0020](0020-theme-system.md) | Theme system | Accepted |
 | [0021](0021-windows-linux-readiness.md) | Windows and Linux readiness | Accepted (implemented, unvalidated) |
+| [0022](0022-orchestration-workspace-scope.md) | Orchestration workspace scope, session lifecycle and shared project memory | Accepted (documentation only; nothing implemented yet) |

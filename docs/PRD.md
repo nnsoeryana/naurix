@@ -1,7 +1,7 @@
 # Naurix — Product Requirements Document
 
-**Version:** 1.1  
-**Status:** Draft for implementation planning (see ADRs 0001–0007 for changes from 1.0)  
+**Version:** 1.2  
+**Status:** Draft for implementation planning (see ADRs 0001–0007 for changes from 1.0; ADR 0022 adds the post-MVP orchestration scope in §5.9)  
 **Platform:** macOS Intel (x86_64) and Apple Silicon (arm64)  
 **License:** Apache-2.0
 
@@ -20,17 +20,20 @@ The MVP focuses on dependable terminal behavior, workspace/session organization,
 - Persist workspace and session metadata locally.
 - Provide basic Git status and diff inspection.
 - Keep the architecture extensible for future adapters and platforms.
+- After the MVP (ADR 0022, §5.9): run several agents concurrently as a provider-agnostic orchestration workspace, with every agent action under one user-controlled approval gate, opt-in project memory, and reusable workflows. Terminal use never depends on any of it.
 
 ## 3. Non-goals
 
-- Agent orchestration, delegation, or agent-to-agent communication.
+- Autonomous orchestration: any agent action, delegation or workflow step that runs without user approval. Approved, user-controlled orchestration is in scope after the MVP (§5.9, ADR 0022).
+- Automatic capture of prompts, transcripts or terminal output as "memory". Memory is explicit and opt-in (§5.9).
+- A background daemon or supervisor process (ADR 0022).
 - Built-in LLM/API provider or model-provider API key management (MCP server credentials are in scope; ADR 0004/0007).
 - Public MCP or skills marketplace (a small static catalog and manual configuration only).
 - Cloud accounts, sync, remote execution, or collaboration.
 - Full code editor or IDE functionality.
 - Guaranteed restoration of arbitrary processes after application termination.
 - Persistent terminal transcript/history capture beyond normal shell history.
-- Automatic approval of agent actions.
+- Automatic approval of agent actions. (A user may grant a scoped approval through the approval gate, §5.9; Naurix never grants one itself.)
 
 ## 4. Personas
 
@@ -95,7 +98,7 @@ Priority definitions:
 | AG-009 | P1 | Waiting-for-input state | Only show when reliable signal exists; otherwise show Unknown/Running |
 | AG-010 | P1 | Notifications | Notify when process exits or a reliable attention signal is received |
 | AG-011 | P1 | Adapter capability display | Show structured protocol, status, and control capabilities per adapter |
-| AG-012 | P2 | Agent-to-agent handoff | Explicit workflow with user approval |
+| AG-012 | P2 | Agent-to-agent handoff | Explicit workflow with user approval (see ORCH-005, WF-001) |
 
 **Important status rule:** process liveness is not equivalent to agent task state. The MVP must not claim an agent is waiting for approval or completed unless a reliable signal exists. Generic CLI sessions can show process state only.
 
@@ -117,12 +120,12 @@ Priority definitions:
 |---|---|---|---|
 | DATA-001 | P0 | Store workspace metadata in SQLite | Workspace metadata survives restart |
 | DATA-002 | P0 | Store session metadata | Session identity, type, title, workspace, timestamps, and last-known state are stored |
-| DATA-003 | P0 | No persistent terminal transcript by default | Terminal output is not written to database or application logs |
-| DATA-004 | P0 | Honest restart recovery | On restart, mark prior process sessions as interrupted/not reattachable unless reattachment is actually implemented |
+| DATA-003 | P0 | No persistent terminal transcript by default | Terminal output is not written to database or application logs. The only user text stored beyond metadata is opt-in memory notes (MEM-001 to MEM-007) |
+| DATA-004 | P0 | Honest restart recovery | On restart of the application process, mark prior process sessions as interrupted/not reattachable. A webview reload or window close is not a restart and must not end sessions once SES-001/SES-002 are implemented (ADR 0022) |
 | DATA-005 | P0 | Handle missing project directory | Show unavailable workspace and allow user to locate or remove it |
 | DATA-006 | P1 | Configurable scrollback persistence | Only after explicit opt-in and security review |
 
-**MVP recovery contract:** persist metadata, not process memory. The application must not imply that a process survived an application quit. If the app exits, child processes may exit as well; behavior must be tested and documented.
+**MVP recovery contract:** persist metadata, not process memory. The application must not imply that a process survived an application quit. On application quit, child processes are terminated gracefully (ADR 0022); this is tested and documented. There is no background daemon, so nothing outlives the Naurix process.
 
 ### 5.6 MCP integration manager
 
@@ -166,9 +169,38 @@ Settings sections: General, Terminal, AI Agents, MCP Integrations, Agent Skills,
 | UX-005 | P1 | Theme and font preferences | Settings survive restart |
 | UX-006 | P1 | Notification preferences | User can disable notifications |
 
+### 5.9 Orchestration workspace (post-MVP, ADR 0022)
+
+Nothing in this section is implemented yet. It is delivered in the stages listed in ADR 0022, each leaving the app runnable. None of it may be required to use the terminal.
+
+| ID | Priority | Requirement | Acceptance criteria |
+|---|---|---|---|
+| SES-001 | P1 | Sessions survive UI reload | Reloading the webview leaves running sessions alive; the view reattaches. Any repaint buffer is in memory, bounded, never persisted |
+| SES-002 | P1 | Sessions survive window close | Closing the window does not end sessions while the Naurix process is alive. Behaviour per platform is defined and tested before it is claimed |
+| SES-003 | P1 | Graceful termination on quit | Quitting terminates agent and terminal processes gracefully (SIGHUP/SIGTERM/SIGKILL ladder); no orphans (tested) |
+| SES-004 | P1 | One stable session identity | A single session id is used by runtime, database and UI; Core owns session start and lifecycle |
+| ORCH-001 | P1 | Agent Runtime separate from Terminal Runtime | Terminal sessions work with the agent runtime absent or disabled; the agent runtime starts and stops processes only through the terminal runtime |
+| ORCH-002 | P1 | Adapter trait with per-capability gating | Behaviour per agent lives in its adapter; a capability is usable only when its level is Verified (or maintainer-accepted for a reversible action). MCP verification does not imply headless, structured events, status or resume |
+| ORCH-003 | P1 | Agents added through adapters | Codex, Gemini CLI, Antigravity CLI and custom CLIs start as PTY-only adapters and gain capabilities one at a time as each is verified |
+| ORCH-004 | P1 | Concurrent runs | Several agent runs can be active at once, with a user-visible limit; state shown only from process state or verified signals |
+| ORCH-005 | P2 | Tasks, runs and dependencies | Task and run metadata with dependency edges; no output or prompts stored |
+| ORCH-006 | P1 | Opt-in worktree isolation | A run may request a Git worktree; creation needs approval at "once" scope and is never silent (see GIT-006) |
+| APR-001 | P1 | Central approval gate | Launching an agent, automated input, run or workflow step, worktree creation and agent-config writes all pass one gate that records and can revoke decisions |
+| APR-002 | P1 | Scoped approvals | Scopes: once, session, run/workflow run, workspace. Bound to a fingerprint of the reviewed target; a changed target needs a new approval. Git mutations and agent-config writes are "once" only. No "approve everything" scope |
+| APR-003 | P1 | Approval visibility | Approvals are listed in Settings (Security), revocable, cleared with the workspace; stored as metadata only |
+| WF-001 | P2 | Reusable workflows | A workflow is a saved set of tasks and dependencies, runnable many times; every step goes through the approval gate |
+| MEM-001 | P2 | Opt-in per workspace | Memory is off until the user enables it for that workspace |
+| MEM-002 | P2 | Explicit content only | Only notes the user writes or approves. Prompts, transcripts and terminal output are never stored automatically |
+| MEM-003 | P2 | No secrets | Suspected credentials are rejected on save; secrets stay in the OS credential store |
+| MEM-004 | P2 | SQLite with FTS5 | Memory is stored in SQLite and searchable with FTS5; FTS5 availability in the shipped build is verified first; deleting an entry also deletes its index rows |
+| MEM-005 | P2 | View, edit, delete | Per entry and per workspace; removing a workspace removes its memory |
+| MEM-006 | P2 | Export | Markdown and JSON, to a location the user chooses; a warning if that location is inside a Git repository |
+| MEM-007 | P2 | Never committed automatically | Naurix never writes memory or exports into a repository and never runs `git add`/`git commit` for them |
+| MEM-008 | P2 | Approved delivery to agents | Memory reaches an agent only through an approved, reversible mechanism (dry-run, backup, rollback); never injected silently |
+
 ## 6. UX and information architecture
 
-(Section numbering of 5.x was extended: MCP is 5.6, Skills 5.7, Settings 5.8.)
+(Section numbering of 5.x was extended: MCP is 5.6, Skills 5.7, Settings 5.8, Orchestration 5.9.)
 
 ### Main window
 - **Sidebar:** workspace list and session/agent list.
@@ -215,6 +247,8 @@ Capabilities should be explicit, for example:
 - `resume_session`
 
 A capability must not be advertised unless implemented and tested. PTY launch is the universal fallback.
+
+Verification is per capability (ADR 0014, ADR 0022). A Verified MCP capability (today Claude Code and OpenCode) does not make headless execution, structured events, status signals or resume verified; each needs its own evidence and agent version. Optional behaviour is reached only through the adapter, so adding an agent should not require edits outside its adapter.
 
 ## 8. Functional flows
 
@@ -275,7 +309,7 @@ A capability must not be advertised unless implemented and tested. PTY launch is
 
 ### Security and privacy
 - Local-first; no network calls required for core features.
-- Do not persist terminal output, prompts, environment variables, or source content by default.
+- Do not persist terminal output, prompts, environment variables, or source content by default. The sole exception is opt-in, user-authored memory notes per workspace (§5.9, ADR 0022).
 - Do not log secrets or full command environment.
 - Avoid passing arbitrary shell strings through a privileged IPC command. Use structured executable/argument arrays.
 - Validate paths and constrain file operations to user-selected workspaces where feasible.
@@ -304,3 +338,5 @@ MVP: no telemetry by default. Local diagnostic logs may contain non-sensitive op
 - [ ] MCP and skill sync never overwrote a pre-existing user config in the fixture suite.
 - [ ] Benchmarks recorded on real Intel and real Apple Silicon hardware.
 - [ ] License, README, contributing guide, and security policy are present.
+
+Additional gates before any §5.9 stage is called done: existing terminal behaviour unchanged (tests green); no orphaned processes after reload, window close and quit; every agent action passes the approval gate; no prompt, transcript or terminal output reaches SQLite or logs; memory export never lands in a repository without the user choosing that path.
