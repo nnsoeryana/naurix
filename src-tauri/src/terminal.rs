@@ -26,6 +26,22 @@ pub struct ExitPayload {
     signal: Option<String>,
 }
 
+/// Adapt the webview channels to a Core output consumer.
+fn output_sink(
+    on_output: Channel<InvokeResponseBody>,
+    on_exit: Channel<ExitPayload>,
+) -> impl FnMut(Outbound) -> bool + Send + 'static {
+    move |out| match out {
+        Outbound::Data(d) => on_output.send(InvokeResponseBody::Raw(d)).is_ok(),
+        Outbound::Exited(i) => on_exit
+            .send(ExitPayload {
+                code: i.code,
+                signal: i.signal,
+            })
+            .is_ok(),
+    }
+}
+
 /// Start a PTY session in a workspace; its output and exit go to the webview channels.
 pub(crate) fn start_session(
     terminals: &Arc<SessionManager>,
@@ -37,15 +53,13 @@ pub(crate) fn start_session(
     on_exit: Channel<ExitPayload>,
 ) -> Result<u64, String> {
     terminals
-        .start(workspace_id, launch, rows, cols, move |out| match out {
-            Outbound::Data(d) => on_output.send(InvokeResponseBody::Raw(d)).is_ok(),
-            Outbound::Exited(i) => on_exit
-                .send(ExitPayload {
-                    code: i.code,
-                    signal: i.signal,
-                })
-                .is_ok(),
-        })
+        .start(
+            workspace_id,
+            launch,
+            rows,
+            cols,
+            output_sink(on_output, on_exit),
+        )
         .map(|id| id.0)
         .map_err(|e| e.to_string())
 }
@@ -155,17 +169,87 @@ pub async fn terminal_has_foreground_job(
     Ok(terminals.has_foreground_job(SessionId(id)).unwrap_or(false))
 }
 
+/// A session that is still known to Core: running, or exited but not yet closed (ADR 0026). Metadata only.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDto {
+    id: u64,
+    workspace_id: String,
+    kind: &'static str,
+    title: String,
+    adapter_id: Option<String>,
+    started_at: String,
+    running: bool,
+    code: Option<u32>,
+    signal: Option<String>,
+}
+
+/// Sessions the webview can attach to (after a reload it has forgotten them).
 #[tauri::command]
-pub async fn terminal_terminate(
+pub async fn session_list(
+    terminals: State<'_, SharedTerminals>,
+) -> Result<Vec<SessionDto>, String> {
+    Ok(terminals
+        .list()
+        .into_iter()
+        .map(|i| SessionDto {
+            id: i.id.0,
+            workspace_id: i.workspace_id,
+            kind: match i.kind {
+                SessionKind::Terminal => "terminal",
+                SessionKind::Agent => "agent",
+            },
+            title: i.title,
+            adapter_id: i.adapter_id,
+            started_at: i.started_at,
+            running: i.exit.is_none(),
+            code: i.exit.as_ref().and_then(|e| e.code),
+            signal: i.exit.and_then(|e| e.signal),
+        })
+        .collect())
+}
+
+/// Make this webview the consumer of an existing session: the PTY is resized to the new view, the
+/// buffered tail is replayed, then live output follows. Returns the consumer's generation for `session_detach`.
+#[tauri::command]
+pub async fn session_attach(
     terminals: State<'_, SharedTerminals>,
     id: u64,
+    rows: u16,
+    cols: u16,
+    on_output: Channel<InvokeResponseBody>,
+    on_exit: Channel<ExitPayload>,
+) -> Result<u64, String> {
+    let id = SessionId(id);
+    // The new view has its own size. An exited session cannot be resized; that is fine.
+    let _ = terminals.resize(id, rows, cols);
+    terminals
+        .attach(id, output_sink(on_output, on_exit))
+        .map_err(|e| e.to_string())
+}
+
+/// The view that attached with `generation` is going away. Ignored if a newer view has since attached.
+/// The process keeps running.
+#[tauri::command]
+pub async fn session_detach(
+    terminals: State<'_, SharedTerminals>,
+    id: u64,
+    generation: u64,
 ) -> Result<(), String> {
+    terminals
+        .detach_if(SessionId(id), generation)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// The user closed this session: stop it if it is running and forget it. This is the only thing that
+/// ends a session on purpose; an unmounting view only detaches.
+#[tauri::command]
+pub async fn session_close(terminals: State<'_, SharedTerminals>, id: u64) -> Result<(), String> {
     let hub = terminals.inner().clone();
-    // terminate() blocks for up to grace + 2 s; keep it off the async worker.
+    // close() blocks for up to grace + 2 s; keep it off the async worker.
     tauri::async_runtime::spawn_blocking(move || {
-        hub.terminate(SessionId(id))
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        hub.close(SessionId(id)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?

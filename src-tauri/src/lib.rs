@@ -4,6 +4,7 @@ mod agent;
 mod clipboard;
 mod events;
 mod git;
+mod lifecycle;
 mod mcp;
 mod settings;
 mod skills;
@@ -15,7 +16,7 @@ use naurix_core::session::SessionManager;
 use serde::Serialize;
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Manager;
 use terminal::{SharedTerminals, TERMINATE_GRACE};
 
@@ -50,7 +51,13 @@ fn build_menu<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<
             &PredefinedMenuItem::hide_others(handle, None)?,
             &PredefinedMenuItem::show_all(handle, None)?,
             &PredefinedMenuItem::separator(handle)?,
-            &PredefinedMenuItem::quit(handle, None)?,
+            &MenuItem::with_id(
+                handle,
+                lifecycle::MENU_QUIT,
+                "Quit Naurix",
+                true,
+                Some("CmdOrCtrl+Q"),
+            )?,
         ],
     )?;
     let edit = Submenu::with_items(
@@ -85,7 +92,11 @@ pub fn run() {
     // The custom menu only exists to rebind Cmd+W on macOS. Linux and Windows get no menu bar:
     // terminal shortcuts are handled in the web view (see src/shortcuts.ts).
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(build_menu);
+    let builder = builder.menu(build_menu).on_menu_event(|app, event| {
+        if event.id() == lifecycle::MENU_QUIT {
+            lifecycle::request_quit(app);
+        }
+    });
     let app = builder
         .setup(|app| {
             // NAURIX_DATA_DIR (absolute path) points the app at a separate data folder, so tests and
@@ -129,11 +140,13 @@ pub fn run() {
             app.manage(terminals);
             Ok(())
         })
+        .on_window_event(lifecycle::on_window_event)
         .on_page_load(|webview, payload| {
-            // A (re)load discards the JS state that owned any running sessions.
+            // A (re)load discards the JS state that held the output consumers, but not the sessions:
+            // they keep running and the new page reattaches (ADR 0026).
             if let tauri::webview::PageLoadEvent::Started = payload.event() {
                 if let Some(t) = webview.try_state::<SharedTerminals>() {
-                    t.shutdown();
+                    t.detach_all();
                 }
             }
         })
@@ -196,7 +209,10 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_ack,
             terminal::terminal_has_foreground_job,
-            terminal::terminal_terminate,
+            terminal::session_list,
+            terminal::session_attach,
+            terminal::session_detach,
+            terminal::session_close,
             terminal::debug_smoke,
             terminal::debug_smoke_visual,
             terminal::bench_config,
@@ -204,12 +220,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Naurix");
 
-    app.run(|handle, event| {
-        // Explicit shutdown policy (TECHNICAL_DESIGN §6): terminate all child sessions on exit.
-        if let tauri::RunEvent::Exit = event {
-            if let Some(t) = handle.try_state::<SharedTerminals>() {
-                t.shutdown();
-            }
-        }
-    });
+    app.run(lifecycle::on_run_event);
 }
