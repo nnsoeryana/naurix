@@ -39,6 +39,46 @@ export async function runSmoke() {
       const w = await workspaceApi.create(cfg.workspace!);
       await st().init();
       st().selectWorkspace(w.id);
+      if (visual === "reload") {
+        // Sessions outlive a page reload (ADR 0026). Phase 1 starts a shell, prints a marker and reloads the
+        // page. Phase 2 (the reloaded page) must find the SAME session, see the marker replayed, and still be able to use it.
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(100);
+          return cond();
+        };
+        const ws = w.id;
+        const pane = () => {
+          const sp = st().spaces[ws];
+          return sp?.tabs.find((t) => t.id === sp.activeTabId)?.activePaneId;
+        };
+        const text = () => (pane() ? (dumpDevTerminals()[pane()!] ?? []).join("\n") : "");
+        if ((st().spaces[ws]?.tabs.length ?? 0) === 0) {
+          st().newTab();
+          await waitFor(() => st().paneState[pane() ?? ""]?.kind === "running");
+          const sid = sessionRegistry.get(pane()!);
+          sessionStorage.setItem("smokeSid", String(sid));
+          await type(pane()!, "echo MARK_$((40+2))\r");
+          const sawMarker = await waitFor(() => text().includes("MARK_42"));
+          await report({ stage: "before-reload", sid, sawMarker });
+          await sleep(300);
+          location.reload();
+          return;
+        }
+        const pa = pane()!;
+        const replayed = await waitFor(() => text().includes("MARK_42"));
+        const sidAfter = sessionRegistry.get(pa);
+        await type(pa, "echo ALIVE_$((50+5))\r");
+        const alive = await waitFor(() => text().includes("ALIVE_55"));
+        const reloads = Number(sessionStorage.getItem("smokeN") ?? "0") + 1;
+        sessionStorage.setItem("smokeN", String(reloads));
+        await report({ stage: "after-reload", reloads, sidBefore: sessionStorage.getItem("smokeSid"), sidAfter, tabs: st().spaces[ws].tabs.length, replayed, alive, state: st().paneState[pa]?.kind, lines: text().split("\n") });
+        if (reloads < 2) {
+          await sleep(300);
+          location.reload(); // a second reload must work just as well
+        }
+        return;
+      }
       if (visual === "mcp") {
         // Whole MCP flow through the real UI: add, approve, store a secret in the Keychain, test, sync, undo.
         const root = cfg.workspace!;
