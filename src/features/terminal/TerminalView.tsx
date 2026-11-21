@@ -11,7 +11,7 @@ import { useStore } from "../../state/store";
 import { agentApi } from "../agents/api";
 import { fontStack } from "./theme";
 import { terminalTheme } from "../../themes/apply";
-import { terminalApi, type ExitPayload } from "./api";
+import { sessionApi, terminalApi, type ExitPayload } from "./api";
 import { sessionRegistry } from "./registry";
 import { terminalHandles } from "./handles";
 import { IMAGE_PASTE_KEY, clipboardHasOnlyImage } from "./attach";
@@ -41,15 +41,17 @@ type Props = {
   agent?: { id: string; reviewed: boolean };
   /** Open a plain shell at the repository root instead of the workspace folder (decided by the backend). */
   atRepoRoot?: boolean;
+  /** Attach to a session Core kept alive (after a reload) instead of starting a new one (ADR 0026). */
+  attachTo?: number;
   onState: (s: TerminalState) => void;
 };
 
-export function TerminalView({ workspaceId, paneId, title, visible, focused, agent, atRepoRoot, onState }: Props) {
+export function TerminalView({ workspaceId, paneId, title, visible, focused, agent, atRepoRoot, attachTo, onState }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
   const handle = useRef<{ fit: () => void; focus: () => void } | null>(null);
-  const initial = useRef({ workspaceId, paneId, title, agent, atRepoRoot: !!atRepoRoot });
+  const initial = useRef({ workspaceId, paneId, title, agent, atRepoRoot: !!atRepoRoot, attachTo });
   const termRef = useRef<Terminal | null>(null);
   const t = useStore((s) => s.settings.terminal);
 
@@ -133,23 +135,45 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
 
     onStateRef.current({ kind: "starting" });
     const a = initial.current.agent;
-    (a
-      ? agentApi.launch(initial.current.workspaceId, a.id, a.reviewed, term.rows, term.cols, output, exit)
-      : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit)
+    const existing = initial.current.attachTo;
+    /** Generation of our output consumer. The consumer of a session we start is generation 0. */
+    let token = 0;
+    if (existing !== undefined) sessionRegistry.set(initial.current.paneId, existing);
+    (existing !== undefined
+      ? sessionApi.attach(existing, term.rows, term.cols, output, exit).then((t) => ((token = t), existing))
+      : a
+        ? agentApi.launch(initial.current.workspaceId, a.id, a.reviewed, term.rows, term.cols, output, exit)
+        : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit)
     )
       .then((sid) => {
         if (disposed) {
-          terminalApi.terminate(sid).catch(() => {});
+          // Nobody owns this view any more. A session we just started goes with it; one we attached to
+          // keeps running and is only released.
+          if (existing !== undefined) sessionApi.detach(sid, token).catch(() => {});
+          else sessionApi.close(sid).catch(() => {});
           return;
         }
         id = sid;
-        if (a) startTurn(initial.current.paneId);
+        if (a && existing === undefined) startTurn(initial.current.paneId);
         sessionRegistry.set(initial.current.paneId, sid);
-        onStateRef.current({ kind: "running" });
+        // The exit notice can arrive before this resolves (attaching to a finished session).
+        if (!exited) onStateRef.current({ kind: "running" });
         acks.flush();
         if (pendingInput) {
           terminalApi.write(sid, pendingInput).catch(() => {});
           pendingInput = "";
+        }
+        if (existing !== undefined) {
+          // Replaying the tail of a byte stream cannot always rebuild a full-screen program's screen.
+          // Nudging the size makes TUIs (agent CLIs, vim) redraw when they get SIGWINCH. Best effort.
+          window.setTimeout(async () => {
+            if (disposed || exited) return;
+            const busy = !!a || (await terminalApi.hasForegroundJob(sid).catch(() => false));
+            if (!busy || disposed || exited) return;
+            const { rows, cols } = term;
+            await terminalApi.resize(sid, rows, cols > 1 ? cols - 1 : cols + 1).catch(() => {});
+            terminalApi.resize(sid, rows, cols).catch(() => {});
+          }, 150);
         }
       })
       .catch((e) => onStateRef.current({ kind: "failed", message: String(e) }));
@@ -209,7 +233,8 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       acks.dispose();
       output.onmessage = () => {};
       exit.onmessage = () => {};
-      if (id !== null && !exited) terminalApi.terminate(id).catch(() => {});
+      // Unmounting only releases the session. Ending it is the user's explicit close (see the store).
+      if (id !== null) sessionApi.detach(id, token).catch(() => {});
       endTurn(initial.current.paneId);
       handle.current = null;
       terminalHandles.delete(initial.current.paneId);

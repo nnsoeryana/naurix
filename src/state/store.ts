@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { cyclePane, hasPane, leaf, paneIds, removePane, setRatio, splitPane, type Layout, type Placement, type SplitDir } from "../features/layout/layout";
 import type { TerminalState } from "../features/terminal/TerminalView";
 import { sessionRegistry } from "../features/terminal/registry";
-import { terminalApi } from "../features/terminal/api";
+import { sessionApi, terminalApi } from "../features/terminal/api";
+import { planReattach } from "../features/terminal/reattach";
 import { tildePath, uniqueTitle } from "../features/workspaces/path";
 import { workspaceApi, type SessionRecord, type Workspace } from "../features/workspaces/api";
 import { agentApi, type AgentInfo } from "../features/agents/api";
@@ -15,7 +16,8 @@ import { resolveAppearance, type ResolvedTheme } from "../themes/resolve";
  * never pass through here.
  */
 export type Tab = { id: string; title: string; layout: Layout; activePaneId: string };
-export type PaneKind = { type: "shell"; atRepoRoot?: boolean } | { type: "agent"; agentId: string; name: string; reviewed: boolean };
+/** `sessionId` is set when the pane reattaches to a session Core kept alive across a reload (ADR 0026). */
+export type PaneKind = { type: "shell"; atRepoRoot?: boolean; sessionId?: number } | { type: "agent"; agentId: string; name: string; reviewed: boolean; sessionId?: number };
 export type Space = { tabs: Tab[]; activeTabId: string | null };
 export type Dialog =
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; danger?: boolean; onConfirm: () => void }
@@ -28,6 +30,7 @@ function systemPrefersDark(): boolean {
 
 let counter = 0;
 let settingsQueue: Promise<void> = Promise.resolve();
+let reattachInflight: Promise<void> | null = null;
 let gitInflight = false;
 let gitPending = false;
 const uid = (prefix: string) => `${prefix}${++counter}`;
@@ -66,6 +69,8 @@ type State = {
   trustRepo: () => Promise<void>;
   newRepoTab: (title: string) => void;
   init: () => Promise<void>;
+  /** Bring back, as one tab each, the sessions Core kept running while the page was reloaded. */
+  reattachSessions: () => Promise<void>;
   addWorkspace: () => Promise<void>;
   selectWorkspace: (id: string) => void;
   /** User picked a project: select it and, if it has no terminal yet, open one (unless a tool screen is showing). */
@@ -130,6 +135,16 @@ export const useStore = create<State>()((set, get) => {
     workspaceApi.recentSessions(wsId).then((rows) => set((s) => ({ previous: { ...s.previous, [wsId]: rows } }))).catch(() => {});
 
   const fail = (e: unknown) => set({ notice: String(e) });
+
+  /**
+   * The user closed this pane on purpose: stop its process and let Core forget the session. This is the
+   * only place a session is ended from the UI; a view that merely unmounts only detaches (ADR 0026).
+   */
+  const endSession = (paneId: string) => {
+    const sid = sessionRegistry.get(paneId);
+    if (sid !== undefined) sessionApi.close(sid).catch(() => {});
+    sessionRegistry.delete(paneId);
+  };
 
   /** Close after asking for confirmation if a command is still running in these panes. */
   const confirmIfBusy = async (panes: string[], title: string, message: string, then: () => void) => {
@@ -234,10 +249,39 @@ export const useStore = create<State>()((set, get) => {
         void get().refreshAgents();
         void get().refreshGit();
         settingsApi.get().then((settings) => (set({ settings }), get().syncTheme())).catch(() => {});
+        await get().reattachSessions();
         await Promise.all(workspaces.map((w) => loadPrevious(w.id)));
       } catch (e) {
         set({ loaded: true, notice: `Could not load workspaces: ${e}` });
       }
+    },
+
+    reattachSessions: () => {
+      // init() can run more than once (React StrictMode in development), and two concurrent runs would
+      // each add a tab for the same session. One run at a time, and never a second pane for a session.
+      reattachInflight ??= (async () => {
+        try {
+          const live = await sessionApi.list();
+          const known = new Set(get().workspaces.map((w) => w.id));
+          const have = sessionRegistry.ids();
+          for (const k of Object.values(get().paneKinds)) if (k.sessionId !== undefined) have.add(k.sessionId);
+          for (const it of planReattach(live, known)) {
+            if (have.has(it.sessionId)) continue;
+            const paneId = uid("p");
+            const tabId = uid("t");
+            const title = uniqueTitle(it.title, (get().spaces[it.workspaceId]?.tabs ?? []).map((t) => t.title));
+            set((st) => ({ paneKinds: { ...st.paneKinds, [paneId]: it.kind } }));
+            patchSpace(it.workspaceId, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title, layout: leaf(paneId), activePaneId: paneId }], activeTabId: sp.activeTabId ?? tabId }));
+          }
+          const active = get().activeWorkspaceId;
+          if (active && (get().spaces[active]?.tabs.length ?? 0) > 0) set({ view: "terminal" });
+        } catch (e) {
+          fail(e);
+        }
+      })().finally(() => {
+        reattachInflight = null;
+      });
+      return reattachInflight;
     },
 
     addWorkspace: async () => {
@@ -352,7 +396,7 @@ export const useStore = create<State>()((set, get) => {
       if (!found) return;
       const apply = () => {
         const { wsId, tab } = found;
-        sessionRegistry.delete(paneId);
+        endSession(paneId);
         patchSpace(wsId, (sp) => {
           const layout = removePane(tab.layout, paneId);
           if (layout === null) {
@@ -385,7 +429,7 @@ export const useStore = create<State>()((set, get) => {
         if (!tab) continue;
         const panes = paneIds(tab.layout);
         const apply = () => {
-          panes.forEach((p) => sessionRegistry.delete(p));
+          panes.forEach(endSession);
           patchSpace(wsId, (cur) => {
             const idx = cur.tabs.findIndex((t) => t.id === tabId);
             const tabs = cur.tabs.filter((t) => t.id !== tabId);
@@ -454,7 +498,11 @@ export const useStore = create<State>()((set, get) => {
       const isAgent = get().paneKinds[paneId]?.type === "agent";
       if (get().settings.general.closeOnCleanExit && !isAgent && st.kind === "exited" && st.code === 0 && st.signal === null) get().closePane(paneId);
     },
-    restartPane: (paneId) => set((s) => ({ paneGen: { ...s.paneGen, [paneId]: (s.paneGen[paneId] ?? 0) + 1 } })),
+    restartPane: (paneId) => {
+      // The old process is over; forget its session so the new one starts clean.
+      endSession(paneId);
+      set((s) => ({ paneGen: { ...s.paneGen, [paneId]: (s.paneGen[paneId] ?? 0) + 1 } }));
+    },
 
     refreshAgents: async () => {
       try {
