@@ -84,6 +84,9 @@ struct Output {
     limit: usize,
     sink: Option<Sink>,
     exit: Option<ExitInfo>,
+    /// Identifies the current consumer. The consumer given to `start` is generation 0; every
+    /// `attach` increments it, so a late `detach_if` from an older consumer cannot drop a newer one.
+    generation: u64,
 }
 
 impl Output {
@@ -263,6 +266,7 @@ impl SessionManager {
                 limit: self.replay_limit,
                 sink: Some(Box::new(sink)),
                 exit: None,
+                generation: 0,
             }),
         });
 
@@ -319,29 +323,32 @@ impl SessionManager {
     /// Make `sink` the consumer of this session, replacing any previous one. The buffered tail of
     /// the output is replayed first, then the exit status if the process already ended, then live
     /// output follows with no gap and no duplicate. Flow control restarts for the new consumer.
+    /// Returns the consumer's generation, to be passed to [`detach_if`](Self::detach_if).
     pub fn attach(
         &self,
         id: SessionId,
         mut sink: impl FnMut(Outbound) -> bool + Send + 'static,
-    ) -> Result<(), SessionError> {
+    ) -> Result<u64, SessionError> {
         let e = self.entry(id)?;
         let mut o = e.out.lock().unwrap();
         e.flow.reopen();
         o.sink = None;
+        o.generation += 1;
+        let token = o.generation;
         let replay: Vec<u8> = o.ring.iter().copied().collect();
         for chunk in replay.chunks(MAX_BATCH_BYTES) {
             e.flow.add(chunk.len());
             if !sink(Outbound::Data(chunk.to_vec())) {
-                return Ok(());
+                return Ok(token);
             }
         }
         if let Some(exit) = &o.exit {
             if !sink(Outbound::Exited(exit.clone())) {
-                return Ok(());
+                return Ok(token);
             }
         }
         o.sink = Some(Box::new(sink));
-        Ok(())
+        Ok(token)
     }
 
     /// Stop delivering output to the current consumer. The process keeps running and keeps draining
@@ -349,6 +356,27 @@ impl SessionManager {
     pub fn detach(&self, id: SessionId) -> Result<(), SessionError> {
         self.entry(id)?.drop_consumer();
         Ok(())
+    }
+
+    /// Like [`detach`](Self::detach), but only if the consumer with this generation is still the
+    /// current one (0 is the consumer passed to `start`). A stale detach from a consumer that has
+    /// already been replaced does nothing. Returns whether a consumer was dropped.
+    pub fn detach_if(&self, id: SessionId, generation: u64) -> Result<bool, SessionError> {
+        let e = self.entry(id)?;
+        if e.out.lock().unwrap().generation != generation {
+            return Ok(false);
+        }
+        e.drop_consumer();
+        Ok(true)
+    }
+
+    /// Drop every consumer; processes keep running. Used when the webview reloads, because the
+    /// consumers it held no longer exist.
+    pub fn detach_all(&self) {
+        let all: Vec<Arc<Entry>> = self.entries.lock().unwrap().values().cloned().collect();
+        for e in all {
+            e.drop_consumer();
+        }
     }
 
     /// Stop the process if it is running and forget the session, freeing its replay buffer.
@@ -420,6 +448,19 @@ impl SessionManager {
             e.drop_consumer();
         }
         self.sup.shutdown_all(self.grace);
+    }
+
+    /// Running sessions that quitting would interrupt: agents, and terminals with a command in the
+    /// foreground. An idle shell does not count. Best effort, like `has_foreground_job`.
+    pub fn busy_count(&self) -> usize {
+        self.list()
+            .iter()
+            .filter(|i| {
+                i.running()
+                    && (i.kind == SessionKind::Agent
+                        || self.sup.has_foreground_job(i.id).unwrap_or(false))
+            })
+            .count()
     }
 
     /// Number of live processes (not counting exited sessions kept for replay).
@@ -512,6 +553,7 @@ mod tests {
             limit,
             sink: None,
             exit: None,
+            generation: 0,
         }
     }
 

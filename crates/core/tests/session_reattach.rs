@@ -287,3 +287,81 @@ fn an_unusable_title_does_not_stop_a_session_from_starting() {
     );
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn a_stale_detach_cannot_drop_a_newer_consumer() {
+    // StrictMode-style remount: consumer 1 is replaced by consumer 2, then consumer 1 "cleans up".
+    let (mgr, _db, ws, dir) = setup(1 << 20);
+    let (s0, _r0) = consumer();
+    let id = mgr
+        .start(&ws, sh("read x; echo after-$x; sleep 30"), 24, 80, s0)
+        .unwrap();
+    let (s1, _r1) = consumer();
+    let t1 = mgr.attach(id, s1).unwrap();
+    let (s2, r2) = consumer();
+    let t2 = mgr.attach(id, s2).unwrap();
+    assert!(t2 > t1);
+
+    assert!(
+        !mgr.detach_if(id, t1).unwrap(),
+        "stale generation is ignored"
+    );
+    mgr.write(id, b"ok\n").unwrap();
+    let (b, _) = read_until(&mgr, id, &r2, |t| t.contains("after-ok"));
+    assert!(
+        String::from_utf8_lossy(&b).contains("after-ok"),
+        "newer consumer still receives"
+    );
+
+    assert!(mgr.detach_if(id, t2).unwrap());
+    // The consumer given to `start` is generation 0 only until the first attach.
+    mgr.close(id).unwrap();
+    assert!(matches!(mgr.detach_if(id, 0), Err(SessionError::NotFound)));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn detach_all_keeps_processes_running_and_reattach_still_works() {
+    let (mgr, _db, ws, dir) = setup(1 << 20);
+    let (s, r) = consumer();
+    let id = mgr.start(&ws, sh("echo hi; sleep 30"), 24, 80, s).unwrap();
+    read_until(&mgr, id, &r, |t| t.contains("hi"));
+    mgr.detach_all();
+    assert_eq!(mgr.session_count(), 1);
+    let (s2, r2) = consumer();
+    mgr.attach(id, s2).unwrap();
+    let (b, _) = read_until(&mgr, id, &r2, |t| t.contains("hi"));
+    assert!(String::from_utf8_lossy(&b).contains("hi"));
+    mgr.close(id).unwrap();
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn busy_count_counts_agents_but_not_idle_shells_or_exited_sessions() {
+    let (mgr, _db, ws, dir) = setup(1 << 20);
+    assert_eq!(mgr.busy_count(), 0);
+
+    // An idle interactive shell is not "busy".
+    let (s1, _r1) = consumer();
+    let mut shell = sh("");
+    shell.args = vec![];
+    shell.program = "/bin/sh".into();
+    let shell_id = mgr.start(&ws, shell, 24, 80, s1).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(mgr.busy_count(), 0, "idle shell");
+
+    // A running agent is.
+    let (s2, _r2) = consumer();
+    let mut agent = sh("sleep 30");
+    agent.kind = SessionKind::Agent;
+    agent.adapter_id = Some("mock".into());
+    let agent_id = mgr.start(&ws, agent, 24, 80, s2).unwrap();
+    assert_eq!(mgr.busy_count(), 1, "running agent");
+
+    // Once it has exited it is not.
+    mgr.terminate(agent_id).unwrap();
+    assert!(wait_for(|| mgr.busy_count() == 0), "exited agent");
+    mgr.close(shell_id).unwrap();
+    mgr.close(agent_id).unwrap();
+    std::fs::remove_dir_all(dir).ok();
+}
