@@ -2,6 +2,7 @@
 
 mod agent;
 mod clipboard;
+mod events;
 mod git;
 mod mcp;
 mod settings;
@@ -10,12 +11,13 @@ mod terminal;
 mod workspace;
 
 use naurix_core::persistence::Db;
+use naurix_core::session::SessionManager;
 use serde::Serialize;
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::Manager;
-use terminal::{SharedTerminals, Terminals};
+use terminal::{SharedTerminals, TERMINATE_GRACE};
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -122,7 +124,9 @@ pub fn run() {
             skills.cleanup_staging();
             skills.seed_builtin();
             app.manage::<mcp::SharedSecrets>(Arc::new(naurix_core::mcp::KeychainStore));
-            app.manage::<SharedTerminals>(Arc::new(Terminals::new(db)));
+            let terminals: SharedTerminals = Arc::new(SessionManager::new(db, TERMINATE_GRACE));
+            events::bridge_session_events(app.handle().clone(), &terminals);
+            app.manage(terminals);
             Ok(())
         })
         .on_page_load(|webview, payload| {

@@ -5,30 +5,19 @@
 //! backend resolves that to a directory it validated itself and starts only the user's login
 //! shell. Agent launches (M5) will go through named presets, not raw programs.
 
-use naurix_core::persistence::{Db, SessionKind};
-use naurix_core::pty::{forward, Flow, Outbound, SessionId, SpawnSpec, Supervisor};
+use naurix_core::persistence::SessionKind;
+use naurix_core::pty::{Outbound, SessionId};
+use naurix_core::session::{SessionLaunch, SessionManager};
 use serde::Serialize;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
-const TERMINATE_GRACE: Duration = Duration::from_secs(3);
+pub(crate) const TERMINATE_GRACE: Duration = Duration::from_secs(3);
 
-struct Entry {
-    flow: Arc<Flow>,
-    workspace_id: String,
-}
-
-pub struct Terminals {
-    sup: Supervisor,
-    pub(crate) db: Arc<Db>,
-    entries: Mutex<HashMap<SessionId, Entry>>,
-}
-
-pub type SharedTerminals = Arc<Terminals>;
+/// Session ownership lives in `naurix-core` (ADR 0023); this layer only adapts it to Tauri.
+pub type SharedTerminals = Arc<SessionManager>;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -37,131 +26,28 @@ pub struct ExitPayload {
     signal: Option<String>,
 }
 
-impl Terminals {
-    pub fn new(db: Arc<Db>) -> Self {
-        Self {
-            sup: Supervisor::new(),
-            db,
-            entries: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Terminate every session. Called when the page (re)loads, since the JS side that owned the
-    /// sessions is gone, and on app exit.
-    pub fn shutdown(&self) {
-        for (_, e) in self.entries.lock().unwrap().drain() {
-            e.flow.close();
-        }
-        self.sup.shutdown_all(TERMINATE_GRACE);
-    }
-
-    /// Terminate all sessions of one workspace (used when the workspace is removed).
-    pub fn terminate_workspace(&self, workspace_id: &str) {
-        let ids: Vec<SessionId> = self
-            .entries
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, e)| e.workspace_id == workspace_id)
-            .map(|(id, _)| *id)
-            .collect();
-        for id in ids {
-            let _ = self.sup.terminate(id, TERMINATE_GRACE);
-        }
-    }
-
-    pub fn session_count(&self) -> usize {
-        self.sup.list().len()
-    }
-
-    fn flow(&self, id: SessionId) -> Result<Arc<Flow>, String> {
-        self.entries
-            .lock()
-            .unwrap()
-            .get(&id)
-            .map(|e| e.flow.clone())
-            .ok_or_else(|| "session not found".to_string())
-    }
-}
-
-/// What to start in a new session. Built only by the backend from validated data.
-pub(crate) struct Launch {
-    pub spec_program: String,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
-    pub kind: SessionKind,
-    pub title: String,
-    pub adapter_id: Option<String>,
-    /// Start somewhere other than the workspace folder. Only ever set by the backend (never from the webview).
-    pub cwd: Option<PathBuf>,
-}
-
-/// Start a PTY session in a workspace, record its metadata, and forward its output.
+/// Start a PTY session in a workspace; its output and exit go to the webview channels.
 pub(crate) fn start_session(
-    terminals: &Arc<Terminals>,
+    terminals: &Arc<SessionManager>,
     workspace_id: &str,
-    launch: Launch,
+    launch: SessionLaunch,
     rows: u16,
     cols: u16,
     on_output: Channel<InvokeResponseBody>,
     on_exit: Channel<ExitPayload>,
 ) -> Result<u64, String> {
-    let ws = terminals
-        .db
-        .workspace(workspace_id)
-        .map_err(|e| e.to_string())?;
-    let cwd = launch.cwd.unwrap_or_else(|| PathBuf::from(&ws.root_path));
-    if !cwd.is_dir() {
-        return Err(format!("The workspace folder is missing: {}", ws.root_path));
-    }
-    let spec = SpawnSpec {
-        program: launch.spec_program,
-        args: launch.args,
-        cwd,
-        env: launch.env,
-        rows,
-        cols,
-    };
-    let (id, rx) = terminals.sup.spawn(&spec).map_err(|e| e.to_string())?;
-    let db_id = terminals
-        .db
-        .insert_session(
-            &ws.id,
-            launch.kind,
-            &launch.title,
-            launch.adapter_id.as_deref(),
-        )
-        .map_err(|e| e.to_string());
-    let flow = Arc::new(Flow::new());
-    terminals.entries.lock().unwrap().insert(
-        id,
-        Entry {
-            flow: flow.clone(),
-            workspace_id: ws.id.clone(),
-        },
-    );
-
-    let hub = terminals.clone();
-    std::thread::Builder::new()
-        .name(format!("forward-{id}"))
-        .spawn(move || {
-            forward(&rx, &flow, |out| match out {
-                Outbound::Data(d) => on_output.send(InvokeResponseBody::Raw(d)).is_ok(),
-                Outbound::Exited(i) => on_exit
-                    .send(ExitPayload {
-                        code: i.code,
-                        signal: i.signal,
-                    })
-                    .is_ok(),
-            });
-            flow.close();
-            hub.entries.lock().unwrap().remove(&id);
-            if let Ok(db_id) = db_id {
-                let _ = hub.db.finish_session(&db_id, "exited");
-            }
+    terminals
+        .start(workspace_id, launch, rows, cols, move |out| match out {
+            Outbound::Data(d) => on_output.send(InvokeResponseBody::Raw(d)).is_ok(),
+            Outbound::Exited(i) => on_exit
+                .send(ExitPayload {
+                    code: i.code,
+                    signal: i.signal,
+                })
+                .is_ok(),
         })
-        .map_err(|e| e.to_string())?;
-    Ok(id.0)
+        .map(|id| id.0)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -180,7 +66,7 @@ pub async fn terminal_spawn(
     // can never name a directory.
     let cwd = if at_repo_root == Some(true) {
         let ws = terminals
-            .db
+            .db()
             .workspace(&workspace_id)
             .map_err(|e| e.to_string())?;
         let root = naurix_core::git::repo_root(std::path::Path::new(&ws.root_path))
@@ -191,11 +77,11 @@ pub async fn terminal_spawn(
         None
     };
     // Shell program and flags come from Settings (validated in core); $SHELL is the default.
-    let settings = naurix_core::settings::get(&terminals.db).map_err(|e| e.to_string())?;
+    let settings = naurix_core::settings::get(terminals.db()).map_err(|e| e.to_string())?;
     let (program, args) =
         naurix_core::settings::shell_command(&settings.terminal, shell_from_env().as_deref());
-    let launch = Launch {
-        spec_program: program,
+    let launch = SessionLaunch {
+        program,
         args,
         env: vec![],
         kind: SessionKind::Terminal,
@@ -221,7 +107,6 @@ pub async fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     terminals
-        .sup
         .write(SessionId(id), data.as_bytes())
         .map_err(|e| e.to_string())
 }
@@ -233,7 +118,6 @@ pub async fn terminal_write_bytes(
     data: Vec<u8>,
 ) -> Result<(), String> {
     terminals
-        .sup
         .write(SessionId(id), &data)
         .map_err(|e| e.to_string())
 }
@@ -246,7 +130,6 @@ pub async fn terminal_resize(
     cols: u16,
 ) -> Result<(), String> {
     terminals
-        .sup
         .resize(SessionId(id), rows, cols)
         .map_err(|e| e.to_string())
 }
@@ -258,8 +141,9 @@ pub async fn terminal_ack(
     id: u64,
     bytes: usize,
 ) -> Result<(), String> {
-    terminals.flow(SessionId(id))?.ack(bytes);
-    Ok(())
+    terminals
+        .ack(SessionId(id), bytes)
+        .map_err(|e| e.to_string())
 }
 
 /// Whether a command is running in the foreground (to confirm before closing). Unknown => false.
@@ -268,10 +152,7 @@ pub async fn terminal_has_foreground_job(
     terminals: State<'_, SharedTerminals>,
     id: u64,
 ) -> Result<bool, String> {
-    Ok(terminals
-        .sup
-        .has_foreground_job(SessionId(id))
-        .unwrap_or(false))
+    Ok(terminals.has_foreground_job(SessionId(id)).unwrap_or(false))
 }
 
 #[tauri::command]
@@ -282,8 +163,7 @@ pub async fn terminal_terminate(
     let hub = terminals.inner().clone();
     // terminate() blocks for up to grace + 2 s; keep it off the async worker.
     tauri::async_runtime::spawn_blocking(move || {
-        hub.sup
-            .terminate(SessionId(id), TERMINATE_GRACE)
+        hub.terminate(SessionId(id))
             .map(|_| ())
             .map_err(|e| e.to_string())
     })

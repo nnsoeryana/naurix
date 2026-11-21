@@ -51,8 +51,16 @@ impl Flow {
         self.state.lock().unwrap().in_flight
     }
 
+    /// Start over for a new consumer (reattach): nothing is in flight and forwarding is allowed again.
+    pub fn reopen(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.in_flight = 0;
+        s.closed = false;
+        self.cv.notify_all();
+    }
+
     /// Block while at/above the high-water mark. Returns false if the flow was closed.
-    fn wait_below_high_water(&self) -> bool {
+    pub(crate) fn wait_below_high_water(&self) -> bool {
         let s = self.state.lock().unwrap();
         let s = self
             .cv
@@ -61,7 +69,7 @@ impl Flow {
         !s.closed
     }
 
-    fn add(&self, n: usize) {
+    pub(crate) fn add(&self, n: usize) {
         self.state.lock().unwrap().in_flight += n;
     }
 }

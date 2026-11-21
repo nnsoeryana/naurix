@@ -1,0 +1,103 @@
+//! Bridges Core domain events (ADR 0024) to the webview as one Tauri event, `session://lifecycle`.
+//! Metadata only (ids, kind, exit status); terminal bytes never travel this way. Nothing in the
+//! frontend consumes it yet.
+
+use naurix_core::events::Event;
+use naurix_core::persistence::SessionKind;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+
+pub const SESSION_LIFECYCLE: &str = "session://lifecycle";
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum LifecyclePayload {
+    #[serde(rename_all = "camelCase")]
+    Started {
+        session: u64,
+        workspace_id: String,
+        kind: &'static str,
+        adapter_id: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Exited {
+        session: u64,
+        workspace_id: String,
+        code: Option<u32>,
+        signal: Option<String>,
+    },
+}
+
+fn payload(e: Event) -> LifecyclePayload {
+    match e {
+        Event::SessionStarted {
+            session,
+            workspace_id,
+            kind,
+            adapter_id,
+        } => LifecyclePayload::Started {
+            session: session.0,
+            workspace_id,
+            kind: match kind {
+                SessionKind::Terminal => "terminal",
+                SessionKind::Agent => "agent",
+            },
+            adapter_id,
+        },
+        Event::SessionExited {
+            session,
+            workspace_id,
+            code,
+            signal,
+        } => LifecyclePayload::Exited {
+            session: session.0,
+            workspace_id,
+            code,
+            signal,
+        },
+    }
+}
+
+/// Forward session events to the webview until the bus is dropped.
+pub fn bridge_session_events(app: AppHandle, terminals: &crate::terminal::SharedTerminals) {
+    let rx = terminals.events().subscribe();
+    let _ = std::thread::Builder::new()
+        .name("session-events".into())
+        .spawn(move || {
+            for e in rx {
+                let _ = app.emit(SESSION_LIFECYCLE, payload(e));
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use naurix_core::pty::SessionId;
+
+    #[test]
+    fn payload_is_camel_case_metadata_only() {
+        let j = serde_json::to_value(payload(Event::SessionExited {
+            session: SessionId(4),
+            workspace_id: "w1".into(),
+            code: Some(0),
+            signal: None,
+        }))
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"type":"exited","session":4,"workspaceId":"w1","code":0,"signal":null})
+        );
+        let j = serde_json::to_value(payload(Event::SessionStarted {
+            session: SessionId(5),
+            workspace_id: "w1".into(),
+            kind: SessionKind::Agent,
+            adapter_id: Some("codex".into()),
+        }))
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"type":"started","session":5,"workspaceId":"w1","kind":"agent","adapterId":"codex"})
+        );
+    }
+}

@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod persistence;
 pub mod platform;
 pub mod pty;
+pub mod session;
 pub mod settings;
 pub mod skills;
 

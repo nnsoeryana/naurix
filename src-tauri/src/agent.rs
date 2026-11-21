@@ -3,12 +3,13 @@
 //! program to be run.
 
 use crate::mcp::SharedSecrets;
-use crate::terminal::{start_session, ExitPayload, Launch, SharedTerminals};
+use crate::terminal::{start_session, ExitPayload, SharedTerminals};
 use naurix_core::agents::{
     adapter, plan_launch, search_dirs, AgentCapability, AgentDef, AgentKind, AgentStore,
     CapabilityInfo, CustomAgent, Feature,
 };
 use naurix_core::persistence::{Db, SessionKind};
+use naurix_core::session::SessionLaunch;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -206,8 +207,8 @@ pub async fn agent_launch(
                 .map_err(err)?,
         );
     }
-    let launch = Launch {
-        spec_program: plan.program.to_string_lossy().into_owned(),
+    let launch = SessionLaunch {
+        program: plan.program.to_string_lossy().into_owned(),
         args: plan.args.clone(),
         env,
         kind: SessionKind::Agent,
