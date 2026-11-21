@@ -27,4 +27,5 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0020](0020-theme-system.md) | Theme system | Accepted |
 | [0021](0021-windows-linux-readiness.md) | Windows and Linux readiness | Accepted (implemented, unvalidated) |
 | [0022](0022-orchestration-workspace-scope.md) | Orchestration workspace scope, session lifecycle and shared project memory | Accepted (documentation only; nothing implemented yet) |
+| [0024](0024-domain-event-bus.md) | Domain event bus in Core (orchestration stage 2) | Proposed |
 | [0025](0025-agent-adapter-trait.md) | `AgentAdapter` trait for per-agent behaviour (orchestration stage 3) | Proposed |

@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod credential;
+pub mod events;
 pub mod git;
 pub mod mcp;
 pub mod persistence;
