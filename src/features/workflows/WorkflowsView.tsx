@@ -204,13 +204,13 @@ export function WorkflowsView() {
 function Editor({ draft, setDraft, agents, defaultAgent, save, cancel }: { draft: Draft; setDraft: (d: Draft) => void; agents: { id: string; name: string }[]; defaultAgent: string; save: () => Promise<void>; cancel: () => void }) {
   return (
     <section className="space-y-3 rounded-lg border border-line p-3" data-workflow-editor>
-      <input aria-label="Workflow name" className={`${input} w-full`} placeholder="Name, for example “Build, then review”" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+      <input aria-label="Workflow name" maxLength={60} className={`${input} w-full`} placeholder="Name, for example “Build, then review”" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
       <ol className="space-y-2">
         {draft.steps.map((s, i) => (
           <li key={i} className="space-y-1 rounded border border-line/60 p-2" data-step-editor>
             <div className="flex items-center gap-2">
               <span className="w-5 text-xs text-faint">{i + 1}.</span>
-              <input aria-label={`Step ${i + 1} name`} className={`${input} min-w-0 flex-1`} value={s.name} onChange={(e) => setDraft({ ...draft, steps: draft.steps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+              <input aria-label={`Step ${i + 1} name`} maxLength={60} className={`${input} min-w-0 flex-1`} value={s.name} onChange={(e) => setDraft({ ...draft, steps: draft.steps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
               <select aria-label={`Step ${i + 1} agent`} className={input} value={s.agentId} onChange={(e) => setDraft({ ...draft, steps: draft.steps.map((x, j) => (j === i ? { ...x, agentId: e.target.value } : x)) })}>
                 {!agents.some((a) => a.id === s.agentId) && <option value={s.agentId}>{s.agentId} (not installed)</option>}
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}

@@ -83,7 +83,8 @@ pub fn clean_name(raw: &str, what: &str) -> Result<String, WorkflowError> {
     }
     if s.chars().count() > MAX_NAME_CHARS {
         return invalid(format!(
-            "{what} names are at most {MAX_NAME_CHARS} characters."
+            "{what}: the name is {} characters long, at most {MAX_NAME_CHARS} are allowed.",
+            s.chars().count()
         ));
     }
     Ok(s)
@@ -91,7 +92,7 @@ pub fn clean_name(raw: &str, what: &str) -> Result<String, WorkflowError> {
 
 /// Check a workflow before it is saved. Returns the cleaned name and step names.
 pub fn validate(name: &str, steps: &[StepInput]) -> Result<(String, Vec<String>), WorkflowError> {
-    let name = clean_name(name, "A workflow")?;
+    let name = clean_name(name, "The workflow")?;
     if steps.is_empty() {
         return invalid("A workflow needs at least one step.");
     }
@@ -101,7 +102,7 @@ pub fn validate(name: &str, steps: &[StepInput]) -> Result<(String, Vec<String>)
     let mut names = Vec::new();
     let mut edges = 0;
     for (i, s) in steps.iter().enumerate() {
-        names.push(clean_name(&s.name, "A step")?);
+        names.push(clean_name(&s.name, &format!("Step {}", i + 1))?);
         if s.agent_id.is_empty()
             || s.agent_id.len() > 64
             || s.agent_id.chars().any(|c| c.is_control())
@@ -329,6 +330,11 @@ mod tests {
         ))
         .contains("cycle"));
         assert!(msg(validate(&"x".repeat(61), &[st("a", &[])])).contains("at most 60"));
+        let long_step = msg(validate("w", &[st("ok", &[]), st(&"y".repeat(75), &[0])]));
+        assert_eq!(
+            long_step,
+            "Step 2: the name is 75 characters long, at most 60 are allowed."
+        );
         let many: Vec<_> = (0..25).map(|i| st(&format!("s{i}"), &[])).collect();
         assert!(msg(validate("w", &many)).contains("at most 24"));
         let mut s = st("a", &[]);
