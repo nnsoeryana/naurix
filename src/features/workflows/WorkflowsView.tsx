@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../state/store";
 import { approvalApi, type ApprovalRequest } from "../approvals/api";
 import { workflowApi, type Run, type Workflow } from "./api";
@@ -19,6 +19,8 @@ export function WorkflowsView() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [review, setReview] = useState<{ workflow: Workflow; request: ApprovalRequest } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? `${id} (not installed)`;
 
   const load = useCallback(async () => {
@@ -32,6 +34,13 @@ export function WorkflowsView() {
     }
   }, [wsId]);
   useEffect(() => void load(), [load, tick]);
+  // A draft or a pending review belongs to the project it was started in.
+  useEffect(() => {
+    setDraft(null);
+    if (reviewRef.current) void approvalApi.decide(reviewRef.current.request.id, { decision: "deny" }).catch(() => {});
+    setReview(null);
+    setError(null);
+  }, [wsId]);
   useEffect(() => {
     // The event bus is lossy by design, so the view also re-reads when the window regains focus.
     window.addEventListener("focus", load);

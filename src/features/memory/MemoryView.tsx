@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { activeSpace, useStore } from "../../state/store";
 import { terminalHandles } from "../terminal/handles";
 import { MAX_BODY, MAX_TITLE, memoryApi, type MemoryStatus, type Note } from "./api";
@@ -22,17 +22,29 @@ export function MemoryView() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Every load gets a number; an answer that is no longer the latest is dropped, so a slow reply for an
+  // older query cannot overwrite the results of the one the user typed last.
+  const latest = useRef(0);
   const load = useCallback(async () => {
     if (!wsId) return;
+    const mine = ++latest.current;
     try {
       const s = await memoryApi.status(wsId);
+      const list = s.enabled ? await memoryApi.list(wsId, query.trim() || null) : [];
+      if (mine !== latest.current) return;
       setStatus(s);
-      setNotes(s.enabled ? await memoryApi.list(wsId, query.trim() || null) : []);
+      setNotes(list);
     } catch (e) {
-      setError(String(e));
+      if (mine === latest.current) setError(String(e));
     }
   }, [wsId, query]);
   useEffect(() => void load(), [load]);
+  // A draft belongs to the project it was started in.
+  useEffect(() => {
+    setEdit(null);
+    setError(null);
+    setInfo(null);
+  }, [wsId]);
 
   if (!wsId || !workspace) return <div className="p-6 text-sm text-muted">Open a project to use memory.</div>;
   const run = (p: Promise<unknown>, after?: () => void) => void p.then(() => (setError(null), after?.(), load())).catch((e) => setError(String(e)));

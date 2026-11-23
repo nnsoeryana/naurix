@@ -554,6 +554,11 @@ export const useStore = create<State>()((set, get) => {
 
     setPaneState: (paneId, st) => {
       set((s) => ({ paneState: { ...s.paneState, [paneId]: st } }));
+      // An ended process has no status to show, even if the lossy `exited` event never arrived.
+      if (st.kind === "exited" || st.kind === "failed") {
+        const sid = sessionRegistry.get(paneId) ?? (get().paneKinds[paneId] as { sessionId?: number } | undefined)?.sessionId;
+        if (sid !== undefined) get().setSessionStatus(sid, null);
+      }
       // A process just ended: it may have changed files.
       if (st.kind === "exited") void get().refreshGit();
       // A clean `exit` closes a shell pane, like other terminals. Failures stay visible, and
