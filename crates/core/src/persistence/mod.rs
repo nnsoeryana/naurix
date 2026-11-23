@@ -4,7 +4,7 @@
 mod time;
 mod workspace;
 
-pub use time::iso8601_utc_now;
+pub use time::{iso8601_utc_in, iso8601_utc_now};
 pub use workspace::{validate_name, validate_root};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -157,6 +157,24 @@ const MIGRATIONS: &[&str] = &[
        created_at TEXT NOT NULL,
        PRIMARY KEY (skill_id, link_path)
      );",
+    // 4: approval gate (ADR 0027). Metadata only: the summary holds an agent name and program path, never
+    // arguments, environment values, prompts or output. App-scoped grants have no workspace and outlive it.
+    "CREATE TABLE approvals (
+       id TEXT PRIMARY KEY,
+       class TEXT NOT NULL,
+       scope TEXT NOT NULL,
+       scope_ref TEXT,
+       fingerprint TEXT NOT NULL,
+       summary TEXT NOT NULL,
+       workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+       state TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       last_used_at TEXT,
+       expires_at TEXT,
+       ended_at TEXT
+     );
+     CREATE INDEX approvals_lookup ON approvals(class, fingerprint, state);
+     ALTER TABLE sessions ADD COLUMN approval_id TEXT;",
 ];
 
 pub struct Db {
@@ -185,6 +203,12 @@ impl Db {
     }
 
     pub(crate) fn c(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap()
+    }
+
+    /// Raw connection for integration tests that must inspect what is actually stored.
+    #[doc(hidden)]
+    pub fn c_for_test(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap()
     }
 

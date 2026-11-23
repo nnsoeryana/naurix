@@ -1,6 +1,7 @@
 //! Framework-independent core (ADR 0002). Must not depend on Tauri.
 
 pub mod agents;
+pub mod approval;
 pub mod credential;
 pub mod events;
 pub mod git;

@@ -10,6 +10,17 @@ pub fn iso8601_utc_now() -> String {
     )
 }
 
+/// UTC time `secs` seconds from now, in the same format (lexicographically comparable).
+pub fn iso8601_utc_in(secs: u64) -> String {
+    format_unix(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+            .saturating_add(secs.min(i64::MAX as u64 / 2) as i64),
+    )
+}
+
 pub(crate) fn format_unix(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
