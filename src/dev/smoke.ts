@@ -211,6 +211,135 @@ export async function runSmoke() {
         await report({ stage: "memory", out });
         return;
       }
+      if (visual === "workflow-graph") {
+        // The run graph (ADR 0030): actions by clicking nodes, keyboard reachability, and the light theme.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const hang = await mk("Hang", "sleep 300");
+        const ok = await mk("Quick ok", "exit 0");
+        await st().refreshAgents();
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        const approveAndRun = async (name: string) => {
+          const flow = (await workflowApi.list(w.id)).find((x) => x.name === name)!;
+          const first = await workflowApi.run(flow.id);
+          if (first.kind === "required") await approvalApi.decide(first.request.id, { decision: "allow", scope: "once" });
+          return workflowApi.run(flow.id);
+        };
+        const node = (name: string) => all("[data-graph-step]").find((e) => e.textContent?.startsWith(name));
+        const nodeButton = (name: string, label: string) => [...(node(name)?.querySelectorAll("button") ?? [])].find((b) => b.textContent === label) as HTMLElement | undefined;
+        const labels = () => Object.fromEntries(all("[data-graph-step]").map((e) => [e.querySelector(".truncate")?.textContent ?? "?", e.getAttribute("data-graph-step")]));
+
+        // Run 1: a (never exits) -> b -> c. Skip b from the graph, then Mark done a from the graph.
+        await workflowApi.save(w.id, null, "Manual", [{ name: "a", agentId: hang.id, dependsOn: [] }, { name: "b", agentId: ok.id, dependsOn: [0] }, { name: "c", agentId: ok.id, dependsOn: [1] }]);
+        st().setView("workflows");
+        await sleep(600);
+        await approveAndRun("Manual");
+        st().bumpRuns();
+        await waitFor(() => !!node("a") && labels().a === "running");
+        out.start = labels();
+        out.skipOnRunningOffered = !!nodeButton("a", "Skip");
+        nodeButton("b", "Skip")?.click();
+        await waitFor(() => labels().b === "skipped");
+        out.afterSkip = labels();
+        await waitFor(() => labels().c === "succeeded", 10000);
+        out.cStartedWhileAStillRuns = { a: labels().a, c: labels().c };
+        nodeButton("a", "Mark done")?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "succeeded", 10000);
+        out.afterMarkDone = { labels: labels(), run: all("[data-run-state]")[0]?.textContent };
+        const aSession = (await sessionApi.list()).filter((x) => x.running).map((x) => x.id);
+        out.agentStillRunning = aSession.length;
+
+        // Run 2: x (never exits) -> y. Cancel the run from its panel.
+        await workflowApi.save(w.id, null, "Cancelable", [{ name: "x", agentId: hang.id, dependsOn: [] }, { name: "y", agentId: ok.id, dependsOn: [0] }]);
+        st().bumpRuns();
+        await sleep(600);
+        await approveAndRun("Cancelable");
+        st().bumpRuns();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "running");
+        await sleep(800);
+        const cancel = all("button").find((b) => b.textContent === "Cancel run");
+        out.cancelOffered = !!cancel;
+        cancel?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "cancelled", 10000);
+        out.afterCancel = { run: all("[data-run-state]")[0]?.textContent, labels: labels() };
+        out.stillRunningAfterCancel = (await sessionApi.list()).filter((x) => x.running).length;
+
+        // Keyboard: what a Tab key can reach.
+        const n0 = all(".react-flow__node")[0];
+        out.keyboard = {
+          nodeTabindex: n0?.getAttribute("tabindex") ?? null,
+          nodeRole: n0?.getAttribute("role") ?? null,
+          nodeAriaLabel: n0?.getAttribute("aria-label") ?? null,
+          edgeLabel: all(".react-flow__edge")[0]?.getAttribute("aria-label") ?? null,
+          buttonsInNodes: all("[data-graph-step] button").map((b) => b.tabIndex),
+          graphAriaLabel: q(".react-flow")?.getAttribute("aria-label") ?? null,
+        };
+        const firstBtn = all("[data-graph-step] button")[0];
+        firstBtn?.focus();
+        out.focusMovesToNodeButton = document.activeElement === firstBtn;
+
+        // Light theme: the class and the contrast of the label text against the card.
+        await st().updateSettings((x) => ({ ...x, appearance: { ...x.appearance, mode: "light" } }));
+        await sleep(900);
+        const lum = (c: string) => {
+          const m = c.match(/[\d.]+/g)!.map(Number);
+          const f = (v: number) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+          return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+        };
+        const ratio = (a: string, b: string) => {
+          const [x, y] = [lum(a), lum(b)].sort((p, r) => r - p);
+          return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10;
+        };
+        const cards = all("[data-graph-step]");
+        out.light = {
+          flowClass: q(".react-flow")?.className.match(/\b(dark|light)\b/)?.[1] ?? null,
+          contrast: cards.slice(0, 4).map((c) => {
+            const label = c.querySelector("[data-graph-label]") as HTMLElement;
+            const name = c.querySelector(".truncate") as HTMLElement;
+            const bg = getComputedStyle(c).backgroundColor;
+            return { state: c.getAttribute("data-graph-step"), label: ratio(getComputedStyle(label).color, bg), name: ratio(getComputedStyle(name).color, bg) };
+          }),
+          edgeStroke: getComputedStyle(q(".react-flow__edge-path")!).stroke,
+        };
+        // Every tone the graph uses, on the card background, in this theme.
+        const probe = document.createElement("div");
+        probe.className = "rounded-lg border bg-raised px-2.5 py-2";
+        document.body.appendChild(probe);
+        const toneContrast: Record<string, number> = {};
+        for (const [tone, cls] of Object.entries({ ok: "text-teal", bad: "text-danger", warn: "text-warning", idle: "text-faint", live: "text-cloud" })) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = "x";
+          probe.appendChild(span);
+          toneContrast[tone] = ratio(getComputedStyle(span).color, getComputedStyle(probe).backgroundColor);
+        }
+        probe.remove();
+        out.toneContrastLight = toneContrast;
+        await st().updateSettings((x) => ({ ...x, appearance: { ...x.appearance, mode: "dark" } }));
+        await sleep(700);
+        const probe2 = document.createElement("div");
+        probe2.className = "bg-raised";
+        document.body.appendChild(probe2);
+        const dark: Record<string, number> = {};
+        for (const [tone, cls] of Object.entries({ ok: "text-teal", bad: "text-danger", warn: "text-warning", idle: "text-faint", live: "text-cloud" })) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = "x";
+          probe2.appendChild(span);
+          dark[tone] = ratio(getComputedStyle(span).color, getComputedStyle(probe2).backgroundColor);
+        }
+        probe2.remove();
+        out.toneContrastDark = dark;
+        for (const x of (await sessionApi.list()).filter((s) => s.running)) await sessionApi.close(x.id);
+        await report({ stage: "workflow-graph", out });
+        return;
+      }
       if (visual === "workflow-ui") {
         // The Workflows editor driven the way a person would: new workflow, steps, dependencies, save, run, approve.
         const out: Record<string, unknown> = {};

@@ -9,7 +9,9 @@ import { canMarkDone, canSkip, isBlocked, stepLabel } from "./model";
 /** The graph of one run (ADR 0030): a read-only picture of the same state the list shows. Loaded on demand. */
 
 const border: Record<string, string> = { ok: "border-teal/60", bad: "border-danger/60", warn: "border-warning/60", idle: "border-line", live: "border-cloud" };
-const text: Record<string, string> = { ok: "text-teal", bad: "text-danger", warn: "text-warning", idle: "text-faint", live: "text-cloud" };
+// The state is written out in readable text; its colour is only a second cue (a dot and the border), because
+// the accent text colours do not reach 4.5:1 on the light theme.
+const dot: Record<string, string> = { ok: "bg-teal", bad: "bg-danger", warn: "bg-warning", idle: "bg-faint", live: "bg-cloud" };
 const btn = "nodrag nopan rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-raised";
 
 /**
@@ -39,7 +41,10 @@ function StepCard({ data }: NodeProps<StepNode>) {
       <Handle type="target" position={Position.Left} isConnectable={false} className="!h-1.5 !w-1.5 !border-0 !bg-faint" />
       <div className="truncate text-[13px] text-cloud" title={step.name}>{step.name}</div>
       <div className="truncate text-[10px] text-faint">{agentName(step.agentId)}</div>
-      <div className={`mt-0.5 line-clamp-2 text-[11px] leading-tight ${text[l.tone]}`} data-graph-label>{l.text}</div>
+      <div className="mt-0.5 flex items-start gap-1.5 text-[11px] leading-tight text-cloud">
+        <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${dot[l.tone]}`} aria-hidden="true" />
+        <span className="line-clamp-2" data-graph-label>{l.text}</span>
+      </div>
       <div className="mt-1 flex gap-1">
         {session !== undefined && <button className={btn} onClick={() => onOpen(session)}>Open terminal</button>}
         {canMarkDone(run, step) && <button className={btn} onClick={() => onDone(step.id)}>Mark done</button>}
@@ -55,7 +60,7 @@ const nodeTypes = { step: StepCard };
 export default function RunGraph({ run, agentName, onOpen, onDone, onSkip }: { run: Run; agentName: (id: string) => string; onOpen: (session: number) => void; onDone: (stepId: string) => void; onSkip: (stepId: string) => void }) {
   const dark = useStore((s) => s.theme.kind !== "light");
   // Only a change in the shape of the run (its steps and dependencies) makes new nodes.
-  const shape = run.steps.map((x) => `${x.id}:${x.dependsOn.join(",")}`).join("|");
+  const shape = run.steps.map((x) => `${x.id}:${x.name}:${x.dependsOn.join(",")}`).join("|");
   const { nodes, height } = useMemo(() => {
     const pos = layoutSteps(run.steps);
     const nodes: StepNode[] = run.steps.map((step) => ({
@@ -63,6 +68,8 @@ export default function RunGraph({ run, agentName, onOpen, onDone, onSkip }: { r
       type: "step",
       position: pos.get(step.id) ?? { x: 0, y: 0 },
       data: { stepId: step.id },
+      // Read when the node is focused; the state is in its text. Stable across state changes, so React Flow keeps its measurements.
+      ariaLabel: `Step ${step.name}`,
       draggable: false,
       connectable: false,
     }));
@@ -80,7 +87,7 @@ export default function RunGraph({ run, agentName, onOpen, onDone, onSkip }: { r
   const live = useMemo(() => ({ run, agentName, onOpen, onDone, onSkip }), [run, agentName, onOpen, onDone, onSkip]);
 
   return (
-    <div style={{ height, ["--xy-edge-stroke-default" as string]: "var(--color-faint)", ["--xy-edge-stroke-selected-default" as string]: "var(--color-purple)" }} className="rounded border border-line/60" data-run-graph>
+    <div style={{ height, ["--xy-edge-stroke" as string]: "var(--color-muted)", ["--xy-edge-stroke-selected" as string]: "var(--color-purple)" }} className="rounded border border-line/60" data-run-graph>
       <LiveRun.Provider value={live}>
       <ReactFlow
         nodes={nodes}
