@@ -50,7 +50,7 @@ export async function runSmoke() {
         await st().refreshAgents();
         const approve = async (id: string, scope: "once" | "workspace") => {
           const r = await agentApi.authorize(w.id, id);
-          if (r.kind === "required") await approvalApi.decide(r.request.id, { decision: "allow", scope });
+          if (r.kind === "required") await approvalApi.decide(r.requests[0].id, { decision: "allow", scope });
         };
         const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
         const grants = async () => (await approvalApi.list()).active.map((g) => `${g.scope}:${g.summary.split(" at ")[0]}`);
@@ -624,7 +624,7 @@ export async function runSmoke() {
 
     // Approve once through the real gate (the backend builds the request), then launch.
     const auth = await agentApi.authorize(st().activeWorkspaceId!, mock.id);
-    if (auth.kind === "required") await approvalApi.decide(auth.request.id, { decision: "allow", scope: "once" });
+    if (auth.kind === "required") await approvalApi.decide(auth.requests[0].id, { decision: "allow", scope: "once" });
     st().launchAgent(mock.id);
     await sleep(2500);
     const running = agentPanes()[1];

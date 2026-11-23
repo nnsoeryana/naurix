@@ -16,6 +16,6 @@ export function planReattach(sessions: LiveSession[], knownWorkspaceIds: Readonl
       workspaceId: s.workspaceId,
       sessionId: s.id,
       title: s.title,
-      kind: s.kind === "agent" ? { type: "agent", agentId: s.adapterId ?? "", name: s.title, sessionId: s.id } : { type: "shell", sessionId: s.id },
+      kind: s.kind === "agent" ? { type: "agent", agentId: s.adapterId ?? "", name: s.title, branch: s.worktreeBranch ?? undefined, sessionId: s.id } : { type: "shell", sessionId: s.id },
     }));
 }

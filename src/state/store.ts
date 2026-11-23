@@ -17,7 +17,7 @@ import { resolveAppearance, type ResolvedTheme } from "../themes/resolve";
  */
 export type Tab = { id: string; title: string; layout: Layout; activePaneId: string };
 /** `sessionId` is set when the pane reattaches to a session Core kept alive across a reload (ADR 0026). */
-export type PaneKind = { type: "shell"; atRepoRoot?: boolean; sessionId?: number } | { type: "agent"; agentId: string; name: string; sessionId?: number };
+export type PaneKind = { type: "shell"; atRepoRoot?: boolean; /** Open in a worktree Naurix created (resolved by the backend). */ worktreeId?: string; sessionId?: number } | { type: "agent"; agentId: string; name: string; /** Start in a fresh worktree (ADR 0028). */ worktree?: boolean; /** Branch of the worktree it runs in, once known. */ branch?: string; sessionId?: number };
 export type Space = { tabs: Tab[]; activeTabId: string | null };
 export type Dialog =
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; danger?: boolean; onConfirm: () => void }
@@ -98,7 +98,10 @@ type State = {
   setAgents: (a: AgentInfo[]) => void;
   openLauncher: (open: boolean) => void;
   /** Open a tab running this agent. The backend refuses unless an approval exists (see the launcher). */
-  launchAgent: (agentId: string) => void;
+  launchAgent: (agentId: string, opts?: { worktree?: boolean }) => void;
+  /** Open a terminal in a worktree Naurix created. The backend resolves the folder from its id. */
+  newWorktreeTab: (title: string, worktreeId: string) => void;
+  setPaneBranch: (paneId: string, branch: string) => void;
   revealPane: (paneId: string) => void;
   setFontFamilyWithPrompt: () => void;
   setFontSizeWithPrompt: () => void;
@@ -236,6 +239,22 @@ export const useStore = create<State>()((set, get) => {
       const unique = uniqueTitle(title, (s.spaces[ws.id]?.tabs ?? []).map((t) => t.title));
       patchSpace(ws.id, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title: unique, layout: leaf(paneId), activePaneId: paneId }], activeTabId: tabId }));
     },
+
+    newWorktreeTab: (title, worktreeId) => {
+      const s = get();
+      const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
+      if (!ws?.available) return;
+      const paneId = uid("p");
+      const tabId = uid("t");
+      set((st) => ({ view: "terminal", paneKinds: { ...st.paneKinds, [paneId]: { type: "shell", worktreeId } } }));
+      const unique = uniqueTitle(title, (s.spaces[ws.id]?.tabs ?? []).map((t) => t.title));
+      patchSpace(ws.id, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title: unique, layout: leaf(paneId), activePaneId: paneId }], activeTabId: tabId }));
+    },
+    setPaneBranch: (paneId, branch) =>
+      set((st) => {
+        const k = st.paneKinds[paneId];
+        return k?.type === "agent" ? { paneKinds: { ...st.paneKinds, [paneId]: { ...k, branch } } } : {};
+      }),
 
     setView: (view) => {
       set({ view });
@@ -518,7 +537,7 @@ export const useStore = create<State>()((set, get) => {
       if (launcherOpen) void get().refreshAgents();
     },
 
-    launchAgent: (agentId) => {
+    launchAgent: (agentId, opts) => {
       const s = get();
       const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
       const agent = s.agents.find((a) => a.id === agentId);
@@ -526,7 +545,7 @@ export const useStore = create<State>()((set, get) => {
       if (!ws.available) return set({ notice: `The folder for “${ws.name}” is missing: ${ws.rootPath}` });
       const paneId = uid("p");
       const tabId = uid("t");
-      set((st) => ({ view: "terminal", paneKinds: { ...st.paneKinds, [paneId]: { type: "agent", agentId, name: agent.name } } }));
+      set((st) => ({ view: "terminal", paneKinds: { ...st.paneKinds, [paneId]: { type: "agent", agentId, name: agent.name, worktree: opts?.worktree } } }));
       patchSpace(ws.id, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title: agent.name, layout: leaf(paneId), activePaneId: paneId }], activeTabId: tabId }));
     },
 

@@ -30,7 +30,7 @@ function Confirm({ d, close }: { d: Extract<Dialog, { kind: "confirm" }>; close:
       onKeyDown={(e) => e.key === "Escape" && close()}
     >
       <h2 className="mb-1 text-sm font-semibold">{d.title}</h2>
-      <p className="mb-4 text-sm text-muted">{d.message}</p>
+      <p className="mb-4 whitespace-pre-wrap break-words text-sm text-muted">{d.message}</p>
       <div className="flex justify-end gap-2">
         <button type="button" className={`${btn} bg-raised hover:bg-line`} onClick={close}>Cancel</button>
         <button ref={ok} type="submit" className={`${btn} ${d.danger ? "btn-danger" : "btn-primary"}`}>{d.confirmLabel}</button>

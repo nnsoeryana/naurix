@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { planReattach } from "./reattach";
 import type { LiveSession } from "./api";
 
-const s = (over: Partial<LiveSession>): LiveSession => ({ id: 1, workspaceId: "w1", kind: "terminal", title: "~/proj", adapterId: null, startedAt: "2026-11-21T00:00:00Z", running: true, code: null, signal: null, ...over });
+const s = (over: Partial<LiveSession>): LiveSession => ({ id: 1, workspaceId: "w1", kind: "terminal", title: "~/proj", adapterId: null, worktreeBranch: null, startedAt: "2026-11-21T00:00:00Z", running: true, code: null, signal: null, ...over });
 
 describe("planReattach", () => {
   it("returns one tab per session of a known workspace, oldest first", () => {
@@ -15,6 +15,11 @@ describe("planReattach", () => {
     const [shell, agent] = planReattach([s({ id: 1 }), s({ id: 2, kind: "agent", title: "Claude Code", adapterId: "claude-code" })], new Set(["w1"]));
     expect(shell.kind).toEqual({ type: "shell", sessionId: 1 });
     expect(agent.kind).toEqual({ type: "agent", agentId: "claude-code", name: "Claude Code", sessionId: 2 });
+  });
+
+  it("keeps the branch of an agent that ran in a worktree", () => {
+    const [a] = planReattach([s({ id: 3, kind: "agent", adapterId: "codex", title: "Codex", worktreeBranch: "naurix/codex-20261123-1105" })], new Set(["w1"]));
+    expect(a.kind).toMatchObject({ type: "agent", branch: "naurix/codex-20261123-1105" });
   });
 
   it("skips sessions of workspaces that are not listed and keeps exited sessions so their output can be read", () => {

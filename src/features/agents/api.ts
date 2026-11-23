@@ -40,8 +40,8 @@ export type CustomAgentInput = {
   env: { name: string; value: string }[];
 };
 
-export type AuthorizeResult = { kind: "allowed" } | { kind: "required"; request: ApprovalRequest };
-export type LaunchError = { kind: "approval_required"; request: ApprovalRequest } | { kind: "error"; message: string };
+export type AuthorizeResult = { kind: "allowed" } | { kind: "required"; requests: ApprovalRequest[] };
+export type LaunchError = { kind: "approval_required"; requests: ApprovalRequest[] } | { kind: "error"; message: string };
 
 /** A readable message for a failed launch, whatever shape the backend rejected with. */
 export function launchErrorMessage(e: unknown): string {
@@ -59,10 +59,10 @@ export const agentApi = {
   saveCustom: (agent: CustomAgentInput) => invoke<AgentInfo[]>("agent_custom_save", { agent }),
   deleteCustom: (id: string) => invoke<AgentInfo[]>("agent_custom_delete", { id }),
   /** Would this agent start now? Spends nothing. When approval is needed the answer carries the request to show. */
-  authorize: (workspaceId: string, agentId: string) => invoke<AuthorizeResult>("agent_authorize", { workspaceId, agentId }),
+  authorize: (workspaceId: string, agentId: string, worktree = false) => invoke<AuthorizeResult>("agent_authorize", { workspaceId, agentId, worktree }),
   /** Fails with `{ kind: "approval_required" }` (starting nothing) unless a matching approval exists. */
-  launch: (workspaceId: string, agentId: string, rows: number, cols: number, onOutput: Channel<ArrayBuffer>, onExit: Channel<ExitPayload>) =>
-    invoke<number>("agent_launch", { workspaceId, agentId, rows, cols, onOutput, onExit }),
+  launch: (workspaceId: string, agentId: string, worktree: boolean, rows: number, cols: number, onOutput: Channel<ArrayBuffer>, onExit: Channel<ExitPayload>) =>
+    invoke<number>("agent_launch", { workspaceId, agentId, worktree, rows, cols, onOutput, onExit }),
   /** Reported version; only for a preset whose executable you approved for every workspace (it runs `--version`). */
   version: (id: string) => invoke<string | null>("agent_version", { id }),
   pickExecutable: async (): Promise<string | null> => {

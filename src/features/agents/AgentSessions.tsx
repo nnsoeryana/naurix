@@ -22,7 +22,7 @@ export function AgentSessions() {
   const items = (space?.tabs ?? []).flatMap((t) =>
     paneIds(t.layout)
       .filter((p) => kinds[p]?.type === "agent")
-      .map((p) => ({ paneId: p, name: (kinds[p] as { name: string }).name, status: agentStatus(states[p]) })),
+      .map((p) => ({ paneId: p, name: (kinds[p] as { name: string }).name, branch: (kinds[p] as { branch?: string }).branch, status: agentStatus(states[p]) })),
   );
 
   return (
@@ -45,6 +45,7 @@ export function AgentSessions() {
                 <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${dot[i.status.label]}`} />
               </span>
               <span className="truncate text-[13px] text-muted">{i.name}</span>
+              {i.branch && <span className="max-w-[7rem] shrink truncate rounded bg-raised px-1 font-mono text-[10px] text-faint" title={`Running in its own worktree on ${i.branch}`} data-worktree-branch>⎇ {i.branch.replace(/^naurix\//, "")}</span>}
               <span className="ml-auto shrink-0 text-[10px] text-faint">{i.status.label}</span>
             </button>
             <button aria-label={`Stop ${i.name}`} className="invisible rounded p-1 text-faint hover:bg-line hover:text-cloud group-hover:visible" onClick={() => close(i.paneId)} title="Stop and close">

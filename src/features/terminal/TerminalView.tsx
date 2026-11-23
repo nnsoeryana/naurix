@@ -9,6 +9,7 @@ import "@xterm/xterm/css/xterm.css";
 import { AckBatcher } from "./ackBatcher";
 import { useStore } from "../../state/store";
 import { agentApi, launchErrorMessage } from "../agents/api";
+import { worktreeApi } from "../worktrees/api";
 import { fontStack } from "./theme";
 import { terminalTheme } from "../../themes/apply";
 import { sessionApi, terminalApi, type ExitPayload } from "./api";
@@ -38,7 +39,9 @@ type Props = {
   /** The pane that should receive keyboard focus. */
   focused: boolean;
   /** When set, start this agent instead of a shell. The backend only starts it if an approval exists. */
-  agent?: { id: string };
+  agent?: { id: string; /** Start it in a fresh worktree. */ worktree?: boolean };
+  /** Open a shell in a worktree Naurix created (the backend resolves the folder from the id). */
+  worktreeId?: string;
   /** Open a plain shell at the repository root instead of the workspace folder (decided by the backend). */
   atRepoRoot?: boolean;
   /** Attach to a session Core kept alive (after a reload) instead of starting a new one (ADR 0026). */
@@ -46,12 +49,12 @@ type Props = {
   onState: (s: TerminalState) => void;
 };
 
-export function TerminalView({ workspaceId, paneId, title, visible, focused, agent, atRepoRoot, attachTo, onState }: Props) {
+export function TerminalView({ workspaceId, paneId, title, visible, focused, agent, atRepoRoot, worktreeId, attachTo, onState }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
   const handle = useRef<{ fit: () => void; focus: () => void } | null>(null);
-  const initial = useRef({ workspaceId, paneId, title, agent, atRepoRoot: !!atRepoRoot, attachTo });
+  const initial = useRef({ workspaceId, paneId, title, agent, atRepoRoot: !!atRepoRoot, worktreeId, attachTo });
   const termRef = useRef<Terminal | null>(null);
   /**
    * The session start (spawn, launch or attach) and its channels, created once per component instance.
@@ -141,8 +144,8 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
         existing !== undefined
           ? sessionApi.attach(existing, term.rows, term.cols, output, exit).then((t) => ((fresh.token = t), existing))
           : a
-            ? agentApi.launch(initial.current.workspaceId, a.id, term.rows, term.cols, output, exit)
-            : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit);
+            ? agentApi.launch(initial.current.workspaceId, a.id, !!a.worktree, term.rows, term.cols, output, exit)
+            : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit, initial.current.worktreeId);
       // Decided once, when the start finishes: if the pane really went away meanwhile, nobody owns the
       // session. One we started is stopped; one we attached to keeps running and is only released.
       fresh.start
@@ -173,6 +176,8 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
         if (disposed) return; // a later run (StrictMode) or the creation-time handler above owns the outcome
         id = sid;
         if (a && existing === undefined) startTurn(initial.current.paneId);
+        // An agent started in a worktree: show which branch it is on.
+        if (a?.worktree && existing === undefined) void worktreeApi.forSession(sid).then((w) => w && useStore.getState().setPaneBranch(initial.current.paneId, w.branch)).catch(() => {});
         sessionRegistry.set(initial.current.paneId, sid);
         // The exit notice can arrive before this resolves (attaching to a finished session).
         if (!exited) onStateRef.current({ kind: "running" });
