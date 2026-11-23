@@ -87,3 +87,29 @@ A setting `maxConcurrentAgents` (default **4**, the only figure measured so far;
 2. **Preset launches keep today's behaviour** through the narrow **app** scope (preset launches only, exact executable path).
 3. **Custom agents may be approved for a workspace**, chosen by the user and bound to the full fingerprint (path, arguments, environment), so any edit asks again. Otherwise they are reviewed on every launch, as today.
 4. **Concurrency limit: default 4, range 1 to 16, counting running agent sessions only.**
+
+## Implementation log (2026-11-23)
+Implemented on branch `feat/approval-gate`: `crates/core/src/approval` (gate, migration 4), `agents` (`launch_action`, `migrate_legacy_approvals`), `session` (concurrency limit, `approval_id`), `settings.agents`, Tauri `approval_*`, `agent_authorize` and `agent_launch`, and the launcher, Security panel and Agents setting in the UI.
+
+Differences from, or additions to, the design above:
+- A fourth grant state, `expired`, for a once grant or request that timed out unused.
+- The gate gained `preview` (would this be allowed, without spending a once grant), `has_app_grant` and `import_grant` (used only to convert old preset approvals). `agent_authorize` previews; `agent_launch` authorizes and spends.
+- `agent_launch` refuses at the agent limit **before** authorizing, so a one-time approval is not lost to a launch that could not have started; `SessionManager::start` checks again atomically.
+- Editing or deleting a custom agent does not revoke its grants; they stop matching (different fingerprint) and stay listed in Security until revoked.
+- The Task and Run model was not built, as decided (moves to stage 8).
+
+Findings while implementing:
+- **React StrictMode launched an agent twice** in development (the pane effect runs twice). That used to be a harmless double spawn; with a one-time approval it spent the approval on the first launch and failed the second. Found by the smoke harness, not by unit tests. A pane now starts its session once per component instance.
+- `mergeSettings` silently dropped any settings section it did not list; it now carries `agents`.
+- The check that `--version` is not run on an unapproved executable was a comment, not a test; it is now enforced by a marker file the mock executable writes when run.
+
+**Evidence from the running app** (sandbox data folder, dev build): an unapproved launch is refused and starts nothing; an agent starts after "allow once"; the database then holds exactly one approval (once, consumed) and the session row links to it; no argument text reaches the approvals table; a missing agent fails with a clear message; at a limit of one, a second agent is refused, its one-time approval is **not** spent, a plain terminal still opens, and after the slot is freed the same agent starts with that approval; two page reloads reattach to the same session with a replayed buffer identical to the one that was on screen.
+
+**Not verified:**
+1. The review dialog and the Security approvals panel were exercised through their commands and the database, not looked at; they need a visual pass on macOS.
+2. The conversion of old preset approvals is covered by a unit test only, not by upgrading a real data folder.
+3. No real agent CLI (Claude Code, Codex, OpenCode) was launched through the gate; only the mock agent was.
+4. The macOS-only code from ADR 0026 and everything here that is not macOS-gated were linted on macOS only; Linux and Windows are left to CI.
+5. A binary replaced at the same path stays approved (the fingerprint does not hash the executable); this is stated in the review text's design, not shown to the user.
+
+**Still pending the maintainer:** marking this ADR Accepted, after which the stage list in ADR 0022 and `AGENTS.md` is amended (Task/Run moves to stage 8; stage 5 is the gate) and PRD gains requirements for the gate and the limit.
