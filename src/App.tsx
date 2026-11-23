@@ -14,6 +14,7 @@ import { McpManager } from "./features/mcp/McpManager";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SkillsManager } from "./features/skills/SkillsManager";
 import { WorkflowsView } from "./features/workflows/WorkflowsView";
+import { MemoryView } from "./features/memory/MemoryView";
 import { ContextMenu } from "./features/terminal/ContextMenu";
 import { Sidebar } from "./features/workspaces/Sidebar";
 import { SHORTCUTS, clipboardShortcut, matchShortcut, tabIndexShortcut } from "./shortcuts";
@@ -165,8 +166,9 @@ function Main() {
   const showSkills = view === "skills";
   const showGit = view === "git";
   const showWorkflows = view === "workflows";
+  const showMemory = view === "memory";
   const showSettings = view === "settings";
-  const showHome = !showMcp && !showSkills && !showGit && !showWorkflows && !showSettings && (view === "home" || !space || space.tabs.length === 0);
+  const showHome = !showMcp && !showSkills && !showGit && !showWorkflows && !showMemory && !showSettings && (view === "home" || !space || space.tabs.length === 0);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
@@ -174,13 +176,14 @@ function Main() {
       <div className="relative min-h-0 flex-1 bg-terminal">
         {/* Every tab of every workspace stays mounted so terminals keep their buffers; hidden ones use display:none. */}
         {Object.entries(spaces).flatMap(([wsId, sp]) =>
-          sp.tabs.map((t) => <PaneTree key={t.id} wsId={wsId} tab={t} visible={!showHome && !showMcp && !showSkills && !showGit && !showWorkflows && !showSettings && wsId === activeId && t.id === sp.activeTabId} />),
+          sp.tabs.map((t) => <PaneTree key={t.id} wsId={wsId} tab={t} visible={!showHome && !showMcp && !showSkills && !showGit && !showWorkflows && !showMemory && !showSettings && wsId === activeId && t.id === sp.activeTabId} />),
         )}
         {showHome && <Home />}
         {showMcp && <McpManager />}
         {showSkills && <SkillsManager />}
         {showGit && <GitPanel />}
         {showWorkflows && <WorkflowsView />}
+        {showMemory && <MemoryView />}
         {showSettings && <SettingsView />}
       </div>
     </main>
