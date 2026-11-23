@@ -341,13 +341,14 @@ impl Db {
         kind: SessionKind,
         title: &str,
         adapter_id: Option<&str>,
+        approval_id: Option<&str>,
     ) -> Result<String, DbError> {
         let title = validate_name(title)?;
         let id = new_id();
         let now = iso8601_utc_now();
         self.c().execute(
-            "INSERT INTO sessions (id, workspace_id, kind, title, adapter_id, lifecycle, started_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6, ?6)",
-            params![id, workspace_id, kind.as_str(), title, adapter_id, now],
+            "INSERT INTO sessions (id, workspace_id, kind, title, adapter_id, lifecycle, started_at, created_at, updated_at, approval_id) VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6, ?6, ?7)",
+            params![id, workspace_id, kind.as_str(), title, adapter_id, now, approval_id],
         )?;
         Ok(id)
     }

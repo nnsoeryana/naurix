@@ -12,7 +12,7 @@
 
 use crate::persistence::{iso8601_utc_in, iso8601_utc_now, Db, DbError};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,7 +41,7 @@ impl ActionClass {
 }
 
 /// How long a grant lasts. Session and run scopes are added when an action class needs them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     /// Used for exactly one matching action, within the time limit.
@@ -129,6 +129,7 @@ impl Action {
 
 /// What the UI needs to ask the user. It carries no fingerprint: the UI cannot name a target.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
     pub id: String,
     pub class: ActionClass,
@@ -254,6 +255,56 @@ impl ApprovalGate {
     /// Allow `action` if a live grant matches, otherwise return a request for the user to decide.
     /// An allowing "once" grant is consumed atomically: it cannot authorize two actions.
     pub fn authorize(&self, action: &Action) -> Result<Verdict, ApprovalError> {
+        self.check(action, true)
+    }
+
+    /// Like [`authorize`](Self::authorize) but a matching "once" grant is **not** spent. For asking
+    /// "would this be allowed?" before the real action, so the UI can show the review first.
+    pub fn preview(&self, action: &Action) -> Result<Verdict, ApprovalError> {
+        self.check(action, false)
+    }
+
+    /// Whether a standing app-wide grant covers this exact action (workspace is irrelevant). Used for
+    /// "this executable is already approved" decisions that must not spend anything.
+    pub fn has_app_grant(&self, action: &Action) -> Result<bool, ApprovalError> {
+        let c = self.db.c();
+        expire(&c, &iso8601_utc_now())?;
+        let n: i64 = c.query_row(
+            "SELECT COUNT(*) FROM approvals WHERE class=?1 AND fingerprint=?2 AND scope='app' AND state='active'",
+            params![action.class.as_str(), action.fingerprint],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Record a standing grant the user already gave through an older mechanism (for example the
+    /// pre-gate preset approvals). Never used for new decisions, and never for "once". Returns whether
+    /// a grant was created (false if an equal one was already active).
+    pub fn import_grant(&self, action: &Action, scope: Scope) -> Result<bool, ApprovalError> {
+        if scope == Scope::Once || !action.allowed_scopes.contains(&scope) {
+            return Err(ApprovalError::ScopeNotAllowed(scope));
+        }
+        let workspace = (scope != Scope::App).then_some(action.workspace_id.as_str());
+        let c = self.db.c();
+        let exists: Option<String> = c
+            .query_row(
+                "SELECT id FROM approvals WHERE class=?1 AND scope=?2 AND fingerprint=?3 AND state='active' AND workspace_id IS ?4",
+                params![action.class.as_str(), scope.as_str(), action.fingerprint, workspace],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if exists.is_some() {
+            return Ok(false);
+        }
+        c.execute(
+            "INSERT INTO approvals (id, class, scope, fingerprint, summary, workspace_id, state, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)",
+            params![self.new_request_id(), action.class.as_str(), scope.as_str(), action.fingerprint, action.summary, workspace, iso8601_utc_now()],
+        )?;
+        Ok(true)
+    }
+
+    fn check(&self, action: &Action, consume: bool) -> Result<Verdict, ApprovalError> {
         let now = iso8601_utc_now();
         {
             let c = self.db.c();
@@ -272,6 +323,9 @@ impl ApprovalGate {
                     )
                     .optional()?;
                 let Some((id, scope)) = hit else { break };
+                if !consume {
+                    return Ok(Verdict::Allowed { approval_id: id });
+                }
                 if scope == "once" {
                     let spent = c.execute(
                         "UPDATE approvals SET state='consumed', last_used_at=?2, ended_at=?2 WHERE id=?1 AND state='active'",

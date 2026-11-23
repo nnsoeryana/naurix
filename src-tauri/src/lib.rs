@@ -1,6 +1,7 @@
 //! Thin Tauri shell: validate IPC input, delegate to `naurix-core`.
 
 mod agent;
+mod approval;
 mod clipboard;
 mod events;
 mod git;
@@ -129,6 +130,12 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
             db.prune_sessions(50).map_err(|e| e.to_string())?;
             app.manage(db.clone());
+            // Approval gate (ADR 0027). Earlier preset approvals become grants once, so nobody is asked
+            // again for what they already approved. A failure leaves the old setting for the next start.
+            let gate: approval::SharedGate =
+                Arc::new(naurix_core::approval::ApprovalGate::new(db.clone()));
+            let _ = naurix_core::agents::migrate_legacy_approvals(&db, &gate);
+            app.manage(gate);
             app.manage(mcp::DataDir(dir.clone()));
             // Half-finished downloads from a previous run are never reused.
             let skills = naurix_core::skills::SkillStore::new(&db, &dir);
@@ -162,7 +169,12 @@ pub fn run() {
             agent::agent_set_path,
             agent::agent_custom_save,
             agent::agent_custom_delete,
+            agent::agent_authorize,
             agent::agent_launch,
+            approval::approval_decide,
+            approval::approval_list,
+            approval::approval_revoke,
+            approval::approval_revoke_all,
             mcp::mcp_list,
             mcp::mcp_catalog,
             mcp::mcp_catalog_input,

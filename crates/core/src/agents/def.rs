@@ -1,5 +1,6 @@
 use super::search::find_executable;
 use super::AgentError;
+use crate::approval::{Action, ActionClass, Scope};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -154,6 +155,59 @@ pub fn validate_custom(c: &CustomAgent) -> Result<(), AgentError> {
         }
     }
     Ok(())
+}
+
+/// The approval action for launching `def` with `program` in a workspace (ADR 0027). Everything in
+/// it comes from the resolved definition, never from the UI.
+///
+/// The fingerprint covers the agent id, the absolute program path, the argument array and the
+/// additional environment entries, so changing any of them asks again. It does not hash the
+/// executable's bytes (an updated binary at the same path stays approved) and does not cover the
+/// environment Naurix adds at launch (such as MCP secrets from the Keychain), which is never shown.
+///
+/// A preset may be approved for every workspace ("app" scope) for that exact path; a custom agent
+/// only per workspace or once.
+pub fn launch_action(def: &AgentDef, program: &Path, workspace_id: &str) -> Action {
+    let program = program.to_string_lossy();
+    let (n_args, n_env) = (
+        format!("args:{}", def.args.len()),
+        format!("env:{}", def.env.len()),
+    );
+    let mut parts: Vec<&str> = vec![&def.id, &program, &n_args];
+    parts.extend(def.args.iter().map(String::as_str));
+    parts.push(&n_env);
+    for (k, v) in &def.env {
+        parts.push(k);
+        parts.push(v);
+    }
+    let command = std::iter::once(program.to_string())
+        .chain(def.args.iter().cloned())
+        .map(|a| quote_for_display(&a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let display = if def.env.is_empty() {
+        command
+    } else {
+        let env = def
+            .env
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{command}\nExtra environment: {env}")
+    };
+    let scopes = match def.kind {
+        AgentKind::Preset => vec![Scope::Once, Scope::Workspace, Scope::App],
+        AgentKind::Custom => vec![Scope::Once, Scope::Workspace],
+    };
+    Action::new(
+        ActionClass::LaunchAgent,
+        workspace_id,
+        &parts,
+        format!("{} at {program}", def.name),
+        display,
+        scopes,
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

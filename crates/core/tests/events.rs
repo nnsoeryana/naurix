@@ -18,6 +18,7 @@ fn launch(script: &str, kind: SessionKind, adapter: Option<&str>) -> SessionLaun
         kind,
         title: "ev".into(),
         adapter_id: adapter.map(str::to_string),
+        approval_id: None,
         cwd: None,
     }
 }

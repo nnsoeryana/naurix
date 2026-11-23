@@ -19,11 +19,11 @@ pub use behavior::{
     adapter_for, agent_adapters, AgentAdapter, McpFileFormat, McpTarget, SkillCompat, SkillFacts,
 };
 pub use def::{
-    plan_launch, validate_custom, AgentCapability, AgentDef, AgentKind, CustomAgent, EnvVar,
-    LaunchPlan, PRESETS,
+    launch_action, plan_launch, validate_custom, AgentCapability, AgentDef, AgentKind, CustomAgent,
+    EnvVar, LaunchPlan, PRESETS,
 };
 pub use search::{find_executable, search_dirs};
-pub use store::AgentStore;
+pub use store::{migrate_legacy_approvals, AgentStore};
 pub use version::detect_version;
 
 #[derive(Debug, thiserror::Error)]

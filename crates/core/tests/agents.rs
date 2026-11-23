@@ -1,10 +1,12 @@
 #![cfg(unix)] // Unix mock programs and symlinks; Windows coverage lives in the *_windows.rs tests (ADR 0021).
 //! Agent store rules and a mock CLI agent launched through the real PTY supervisor.
 use naurix_core::agents::*;
+use naurix_core::approval::{ApprovalGate, Decision, Scope, Verdict};
 use naurix_core::persistence::Db;
 use naurix_core::pty::*;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn tmpdir(tag: &str) -> PathBuf {
@@ -90,60 +92,163 @@ fn custom_agents_persist_across_reopen() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The action the gate sees for launching `id` in `ws`, built exactly as `agent_launch` builds it.
+fn action_for(
+    st: &AgentStore<'_>,
+    id: &str,
+    dirs: &[PathBuf],
+    ws: &str,
+) -> naurix_core::approval::Action {
+    let (def, plan) = st.prepare_launch(id, dirs).unwrap();
+    launch_action(&def, &plan.program, ws)
+}
+
+fn allowed(g: &ApprovalGate, a: &naurix_core::approval::Action) -> bool {
+    matches!(g.authorize(a).unwrap(), Verdict::Allowed { .. })
+}
+
+fn request(
+    g: &ApprovalGate,
+    a: &naurix_core::approval::Action,
+) -> naurix_core::approval::ApprovalRequest {
+    match g.preview(a).unwrap() {
+        Verdict::Required(r) => r,
+        v => panic!("expected a request, got {v:?}"),
+    }
+}
+
 #[test]
-fn review_rule_for_presets_and_custom_agents() {
+fn review_rule_for_presets_and_custom_agents_now_runs_through_the_gate() {
     let dir = tmpdir("review");
     make_exec(&dir, "claude", "#!/bin/sh\n");
     make_exec(&dir, "mytool", "#!/bin/sh\n");
     let dirs = vec![dir.clone()];
-    let db = Db::open_in_memory().unwrap();
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let ws = db.create_workspace(dir.to_str().unwrap()).unwrap().id;
+    let gate = ApprovalGate::new(db.clone());
     let st = AgentStore::new(&db);
 
-    // Preset: first launch needs review; after approval it does not.
-    assert!(matches!(
-        st.prepare_launch("claude-code", &dirs, false),
-        Err(AgentError::ReviewRequired)
-    ));
-    let (_, plan) = st.prepare_launch("claude-code", &dirs, true).unwrap();
-    st.approve("claude-code", &plan.program).unwrap();
-    assert!(st.prepare_launch("claude-code", &dirs, false).is_ok());
+    // Preset: the first launch needs approval; approved for every workspace it needs no more.
+    let a = action_for(&st, "claude-code", &dirs, &ws);
+    assert!(a.allowed_scopes.contains(&Scope::App));
+    let r = request(&gate, &a);
+    assert!(r.display.contains("claude"), "{}", r.display);
+    gate.decide(&r.id, Decision::Allow(Scope::App)).unwrap();
+    assert!(allowed(&gate, &a));
+    assert!(gate.has_app_grant(&a).unwrap());
 
-    // Choosing a different executable invalidates the approval.
+    // Choosing a different executable invalidates the approval (different fingerprint).
     let other = make_exec(&dir, "claude-alt", "#!/bin/sh\n");
     st.set_path_override("claude-code", Some(other.to_str().unwrap()))
         .unwrap();
-    assert!(matches!(
-        st.prepare_launch("claude-code", &dirs, false),
-        Err(AgentError::ReviewRequired)
-    ));
+    let moved = action_for(&st, "claude-code", &dirs, &ws);
+    assert!(!allowed(&gate, &moved));
     st.set_path_override("claude-code", None).unwrap();
-    assert!(matches!(
-        st.prepare_launch("claude-code", &dirs, false),
-        Err(AgentError::ReviewRequired)
-    ));
+    assert!(
+        allowed(&gate, &action_for(&st, "claude-code", &dirs, &ws)),
+        "back to the approved path"
+    );
     assert!(st
         .set_path_override("claude-code", Some("/no/such/file"))
         .is_err());
     assert!(st.set_path_override("no-such-agent", None).is_err());
 
-    // Custom agents must always be reviewed, even after approve().
+    // Custom agent: cannot be approved for every workspace; a workspace approval binds to the full definition.
     let c = st.save_custom(new_custom("Mine", "mytool")).unwrap();
+    let ca = action_for(&st, &c.id, &dirs, &ws);
+    assert!(!ca.allowed_scopes.contains(&Scope::App));
+    let cr = request(&gate, &ca);
     assert!(matches!(
-        st.prepare_launch(&c.id, &dirs, false),
-        Err(AgentError::ReviewRequired)
+        gate.decide(&cr.id, Decision::Allow(Scope::App)),
+        Err(naurix_core::approval::ApprovalError::ScopeNotAllowed(
+            Scope::App
+        ))
     ));
-    let (_, p) = st.prepare_launch(&c.id, &dirs, true).unwrap();
-    st.approve(&c.id, &p.program).unwrap();
-    assert!(matches!(
-        st.prepare_launch(&c.id, &dirs, false),
-        Err(AgentError::ReviewRequired)
-    ));
+    gate.decide(&cr.id, Decision::Allow(Scope::Workspace))
+        .unwrap();
+    assert!(allowed(&gate, &ca));
+    let mut edited = new_custom("Mine", "mytool");
+    edited.id = c.id.clone();
+    edited.args.push("--different".into());
+    st.save_custom(edited).unwrap();
+    assert!(
+        !allowed(&gate, &action_for(&st, &c.id, &dirs, &ws)),
+        "editing the command asks again"
+    );
+    assert!(
+        !gate.has_app_grant(&ca).unwrap(),
+        "a custom agent never holds an app-wide grant"
+    );
 
-    // Not installed: clear error, regardless of review.
+    // Not installed: clear error, regardless of approval.
     assert!(matches!(
-        st.prepare_launch("codex", &dirs, true),
+        st.prepare_launch("codex", &dirs),
         Err(AgentError::NotFound { .. })
     ));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn the_action_shows_the_full_command_but_persists_only_a_name_and_path() {
+    let dir = tmpdir("display");
+    make_exec(&dir, "mytool", "#!/bin/sh\n");
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let ws = db.create_workspace(dir.to_str().unwrap()).unwrap().id;
+    let st = AgentStore::new(&db);
+    let mut c = new_custom("Mine", "mytool");
+    c.args = vec!["--flag".into(), "has space".into()];
+    c.env = vec![EnvVar {
+        name: "MODE".into(),
+        value: "fast".into(),
+    }];
+    let c = st.save_custom(c).unwrap();
+    let a = action_for(&st, &c.id, std::slice::from_ref(&dir), &ws);
+    assert!(
+        a.display.contains("--flag 'has space'") && a.display.contains("MODE=fast"),
+        "{}",
+        a.display
+    );
+    assert!(
+        a.summary.starts_with("Mine at ")
+            && !a.summary.contains("--flag")
+            && !a.summary.contains("MODE"),
+        "{}",
+        a.summary
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn legacy_preset_approvals_become_app_grants_once_and_the_old_setting_is_removed() {
+    let dir = tmpdir("legacy");
+    let exe = make_exec(&dir, "claude", "#!/bin/sh\n");
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let gate = ApprovalGate::new(db.clone());
+    let legacy = serde_json::json!({
+        "claude-code": exe.to_string_lossy(),
+        "no-such-agent": "/x",
+    });
+    db.set_setting("agents.approved", &legacy.to_string())
+        .unwrap();
+
+    assert_eq!(migrate_legacy_approvals(&db, &gate).unwrap(), 1);
+    assert_eq!(db.get_setting("agents.approved").unwrap(), None);
+    let a = launch_action(&AgentDef::preset("claude-code").unwrap(), &exe, "");
+    assert!(
+        gate.has_app_grant(&a).unwrap(),
+        "the earlier approval still holds, so no new prompt"
+    );
+    assert_eq!(gate.list_active().unwrap().len(), 1);
+    // Running it again changes nothing.
+    assert_eq!(migrate_legacy_approvals(&db, &gate).unwrap(), 0);
+    assert_eq!(gate.list_active().unwrap().len(), 1);
+    // A different path was never approved.
+    let elsewhere = launch_action(
+        &AgentDef::preset("claude-code").unwrap(),
+        std::path::Path::new("/tmp/other/claude"),
+        "",
+    );
+    assert!(!gate.has_app_grant(&elsewhere).unwrap());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -200,7 +305,7 @@ fn mock_agent_launches_interacts_and_reports_exit() {
     );
     let mut all_dirs = vec![dir.clone()];
     all_dirs.extend(dirs);
-    let (_, plan) = st.prepare_launch(&c.id, &all_dirs, true).unwrap();
+    let (_, plan) = st.prepare_launch(&c.id, &all_dirs).unwrap();
 
     let sup = Supervisor::new();
     let (id, rx) = sup

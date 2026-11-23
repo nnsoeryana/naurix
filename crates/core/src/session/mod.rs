@@ -52,6 +52,8 @@ pub struct SessionLaunch {
     pub kind: SessionKind,
     pub title: String,
     pub adapter_id: Option<String>,
+    /// The approval that allowed this launch, recorded on the session row for traceability (ADR 0027).
+    pub approval_id: Option<String>,
     /// Start somewhere other than the workspace folder. Only ever set by the backend.
     pub cwd: Option<PathBuf>,
 }
@@ -243,17 +245,19 @@ impl SessionManager {
         };
         let (id, rx) = self.sup.spawn(&spec)?;
         let title = sanitize_title(&launch.title);
-        let db_id =
-            match self
-                .db
-                .insert_session(&ws.id, launch.kind, &title, launch.adapter_id.as_deref())
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    let _ = self.sup.terminate(id, self.grace);
-                    return Err(e.into());
-                }
-            };
+        let db_id = match self.db.insert_session(
+            &ws.id,
+            launch.kind,
+            &title,
+            launch.adapter_id.as_deref(),
+            launch.approval_id.as_deref(),
+        ) {
+            Ok(d) => d,
+            Err(e) => {
+                let _ = self.sup.terminate(id, self.grace);
+                return Err(e.into());
+            }
+        };
         let entry = Arc::new(Entry {
             flow: Arc::new(Flow::new()),
             workspace_id: ws.id.clone(),

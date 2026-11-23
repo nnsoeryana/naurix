@@ -34,6 +34,7 @@ fn sh(script: &str) -> SessionLaunch {
         kind: SessionKind::Terminal,
         title: "t".into(),
         adapter_id: None,
+        approval_id: None,
         cwd: None,
     }
 }

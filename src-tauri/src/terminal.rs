@@ -101,6 +101,7 @@ pub async fn terminal_spawn(
         kind: SessionKind::Terminal,
         title: title.unwrap_or_else(|| "Terminal".into()),
         adapter_id: None,
+        approval_id: None,
         cwd,
     };
     start_session(

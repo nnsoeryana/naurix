@@ -222,39 +222,83 @@ fn presence_detection_reports_existence_only() {
 }
 
 #[test]
-fn version_is_only_queried_for_approved_executables() {
+fn version_is_only_queried_for_presets_approved_for_every_workspace() {
+    use naurix_core::approval::{ApprovalGate, Decision, Scope, Verdict};
+    use std::sync::Arc;
+
     let dir = std::env::temp_dir().join(format!("at-verstore-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    let ran = dir.join("was-run");
     let exe = dir.join("mockagent");
+    // Running it leaves a marker, so "must not execute an unreviewed binary" is checked, not assumed.
     std::fs::write(
         &exe,
-        "#!/bin/sh\n[ \"$1\" = --version ] && echo 'mockagent 9.9.9'\n",
+        format!(
+            "#!/bin/sh\ntouch {}\n[ \"$1\" = --version ] && echo 'mockagent 9.9.9'\n",
+            ran.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let db = Db::open_in_memory().unwrap();
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let gate = ApprovalGate::new(db.clone());
     let st = AgentStore::new(&db);
+    st.set_path_override("claude-code", Some(exe.to_str().unwrap()))
+        .unwrap();
+    let dirs = vec![dir.clone()];
+
+    // Not approved: refuses, and nothing was executed.
+    assert!(matches!(
+        st.version_if_approved("claude-code", &dirs, &gate),
+        Err(AgentError::ReviewRequired)
+    ));
+    assert!(!ran.exists(), "an unapproved executable must not be run");
+
+    // A once or workspace approval is not enough to run it for a version query.
+    let ws = db.create_workspace(dir.to_str().unwrap()).unwrap().id;
+    let (def, plan) = st.prepare_launch("claude-code", &dirs).unwrap();
+    let action = launch_action(&def, &plan.program, &ws);
+    let Verdict::Required(r) = gate.preview(&action).unwrap() else {
+        panic!("expected a request")
+    };
+    gate.decide(&r.id, Decision::Allow(Scope::Workspace))
+        .unwrap();
+    assert!(matches!(
+        st.version_if_approved("claude-code", &dirs, &gate),
+        Err(AgentError::ReviewRequired)
+    ));
+    assert!(!ran.exists());
+
+    // Approved for every workspace: the version is read.
+    let Verdict::Required(r) = gate
+        .preview(&launch_action(&def, &plan.program, "other"))
+        .unwrap()
+    else {
+        panic!("expected a request")
+    };
+    gate.decide(&r.id, Decision::Allow(Scope::App)).unwrap();
+    assert_eq!(
+        st.version_if_approved("claude-code", &dirs, &gate)
+            .unwrap()
+            .as_deref(),
+        Some("mockagent 9.9.9")
+    );
+    assert!(ran.exists());
+
+    // A custom agent can never hold an app-wide grant, so it never qualifies.
     let c = st
         .save_custom(CustomAgent {
             id: String::new(),
             name: "Mock".into(),
-            executable: "mockagent".into(),
+            executable: exe.to_string_lossy().into_owned(),
             args: vec![],
             env: vec![],
         })
         .unwrap();
-    let dirs = vec![dir.clone()];
-    // Not approved: must refuse, and must not have executed anything.
     assert!(matches!(
-        st.version_of_approved(&c.id, &dirs),
+        st.version_if_approved(&c.id, &dirs, &gate),
         Err(AgentError::ReviewRequired)
     ));
-    let (_, plan) = st.prepare_launch(&c.id, &dirs, true).unwrap();
-    st.approve(&c.id, &plan.program).unwrap();
-    assert_eq!(
-        st.version_of_approved(&c.id, &dirs).unwrap().as_deref(),
-        Some("mockagent 9.9.9")
-    );
     std::fs::remove_dir_all(dir).unwrap();
 }
