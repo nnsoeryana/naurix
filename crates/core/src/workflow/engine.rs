@@ -90,6 +90,9 @@ impl Engine {
                     } = e
                     {
                         me.on_exit(session, code, signal.is_some());
+                        // Any session ending can free an agent slot, not only a workflow's own, so
+                        // steps that were waiting for a slot get another chance.
+                        me.retry_waiting();
                     }
                 }
             });
@@ -302,6 +305,24 @@ impl Engine {
         let _ = self.advance_locked(&run_id);
         if let Ok(run) = store.get(&run_id) {
             self.publish(&run);
+        }
+    }
+
+    /// Try to start steps that are ready but were held back (for example by the agent limit).
+    fn retry_waiting(&self) {
+        let _g = self.lock.lock().unwrap();
+        let store = RunStore::new(&self.db);
+        for run in store.active().unwrap_or_default() {
+            if run.ready().is_empty() {
+                continue;
+            }
+            let before: Vec<StepState> = run.steps.iter().map(|s| s.state).collect();
+            let _ = self.advance_locked(&run.id);
+            if let Ok(after) = store.get(&run.id) {
+                if after.state != run.state || after.steps.iter().map(|s| s.state).ne(before) {
+                    self.publish(&after);
+                }
+            }
         }
     }
 

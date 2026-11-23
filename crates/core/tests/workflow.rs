@@ -653,3 +653,29 @@ fn nothing_an_agent_prints_or_the_run_does_reaches_the_database() {
         );
     }
 }
+
+#[test]
+fn a_waiting_step_starts_when_a_manual_agent_frees_the_slot() {
+    let r = rig();
+    r.sessions.set_max_agents(1);
+    // A manual (non-workflow) agent holds the only slot.
+    let manual = r.fake.launch(&r.ws, "hang", "x").unwrap();
+    let wf = WorkflowStore::new(&r.db)
+        .save(&r.ws, None, "Waits", &[step("a", "ok", &[])])
+        .unwrap();
+    let run = run_it(&r, &wf.id);
+    assert_eq!(
+        states(&r, &run.id),
+        [StepState::Pending],
+        "no free slot: the step waits"
+    );
+    r.sessions.close(manual).unwrap();
+    assert!(
+        wait_until(|| finished(&r, &run.id)),
+        "the step must start once the slot is free"
+    );
+    assert_eq!(
+        r.engine.get_run(&run.id).unwrap().state,
+        RunState::Succeeded
+    );
+}
