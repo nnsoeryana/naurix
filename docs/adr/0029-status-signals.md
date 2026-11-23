@@ -1,5 +1,5 @@
 # ADR 0029 — Verified status signals per agent, Claude Code first (orchestration stage 7)
-**Status:** Proposed (maintainer to accept; the scope, installation, display and spike questions were answered on 2026-11-23, see the end). **Design and spike results only; no product code.** Implements stage 7 of ADR 0022 (§4.7). Follows ADR 0011 and AGENTS.md: "do not claim an agent is waiting for approval or completed unless a reliable adapter signal supports it".
+**Status:** Accepted (2026-11-23, maintainer; the scope, installation, display, spike and opt-in questions were answered, see the end). **Design and spike results; product code follows in the implementation commits.** Implements stage 7 of ADR 0022 (§4.7). Follows ADR 0011 and AGENTS.md: "do not claim an agent is waiting for approval or completed unless a reliable adapter signal supports it".
 
 ## Context
 Today the sidebar can say only what the **process** is doing (running, exited). It cannot say that an agent is waiting for the user, because nothing reliable tells Naurix so. Guessing from output (quiet timers, regexes on terminal text) is forbidden (ADR 0022 §1.5), and reading terminal output for it would also break the metadata-first rule.
@@ -40,7 +40,7 @@ An adapter that has a **Verified** `StatusSignals` capability says how its agent
 - **No hook reads stdin.** Each hook command is a fixed one-word writer, for example `printf 'permission_request\n' >> '<spool>'`, so the prompt, answer and tool input are never read, written or logged by Naurix. The word, not the payload, is the signal.
 - `~/.claude/settings.json` and project settings are **never modified**; there is nothing to back up or roll back. Running `claude` outside Naurix is unaffected.
 - The extra argument is part of the launch the user reviews. The launch fingerprint (ADR 0027) covers the final argument list, so turning the capability on or off asks for approval again; this is intended.
-- The capability is **off by default per agent** and switched on in Settings once the user has seen what it does (AGENTS.md: structured capabilities are opt-in). *Proposed by me, not yet confirmed: see "Still to confirm".*
+- The capability is **off by default per agent** and switched on in Settings once the user has seen what it does (AGENTS.md: structured capabilities are opt-in).
 
 ### 3. Transport: a per-session spool file, no new process and no network
 - One append-only file per session under the Naurix data directory (`<data>/signals/<session id>`), created by Core with owner-only permissions (through `platform`), deleted when the session is closed or on the next start.
@@ -69,7 +69,7 @@ An adapter that has a **Verified** `StatusSignals` capability says how its agent
 2. **Installation: per launch with `--settings`**, no writes to user config.
 3. **Display: only the verified states**, no message text.
 4. **Spike: real calls allowed**; two small `claude -p` runs were made, results above.
+5. **The capability is opt-in per agent in Settings**, off by default.
 
-## Still to confirm
-- Whether the capability is **opt-in per agent in Settings** (proposed here) or on by default for Claude Code.
+## Still open
 - Whether a desktop notification on "Waiting for approval" is wanted in a later stage; it is not part of this one.
