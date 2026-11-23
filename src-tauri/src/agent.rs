@@ -296,6 +296,7 @@ pub async fn agent_launch(
         title: def.name.clone(),
         adapter_id: Some(def.id.clone()),
         approval_id: Some(approval_id),
+        worktree_id: None,
         cwd: None,
     };
     Ok(start_session(

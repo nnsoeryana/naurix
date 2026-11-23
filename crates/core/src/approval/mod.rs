@@ -30,12 +30,18 @@ const HISTORY_KEEP: i64 = 200;
 #[serde(rename_all = "snake_case")]
 pub enum ActionClass {
     LaunchAgent,
+    /// Create a Git worktree (a Git mutation: once only, ADR 0028).
+    CreateWorktree,
+    /// Remove a worktree Naurix created (a Git mutation: once only, ADR 0028).
+    RemoveWorktree,
 }
 
 impl ActionClass {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LaunchAgent => "launch_agent",
+            Self::CreateWorktree => "create_worktree",
+            Self::RemoveWorktree => "remove_worktree",
         }
     }
 }
@@ -108,6 +114,12 @@ pub struct Action {
 }
 
 impl Action {
+    /// The workspace this action belongs to, or `None` when there is none (for example a worktree whose
+    /// workspace has been removed). Grants are stored with a NULL workspace in that case.
+    pub fn workspace(&self) -> Option<&str> {
+        Some(self.workspace_id.as_str()).filter(|w| !w.is_empty())
+    }
+
     pub fn new(
         class: ActionClass,
         workspace_id: &str,
@@ -284,7 +296,7 @@ impl ApprovalGate {
         if scope == Scope::Once || !action.allowed_scopes.contains(&scope) {
             return Err(ApprovalError::ScopeNotAllowed(scope));
         }
-        let workspace = (scope != Scope::App).then_some(action.workspace_id.as_str());
+        let workspace = (scope != Scope::App).then(|| action.workspace()).flatten();
         let c = self.db.c();
         let exists: Option<String> = c
             .query_row(
@@ -315,10 +327,10 @@ impl ApprovalGate {
                     .query_row(
                         "SELECT id, scope FROM approvals
                          WHERE class=?1 AND fingerprint=?2 AND state='active'
-                           AND (scope='app' OR (scope IN ('workspace','once') AND workspace_id=?3))
+                           AND (scope='app' OR (scope IN ('workspace','once') AND workspace_id IS ?3))
                          ORDER BY CASE scope WHEN 'app' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END, created_at
                          LIMIT 1",
-                        params![action.class.as_str(), action.fingerprint, action.workspace_id],
+                        params![action.class.as_str(), action.fingerprint, action.workspace()],
                         |r| Ok((r.get(0)?, r.get(1)?)),
                     )
                     .optional()?;
@@ -409,7 +421,7 @@ impl ApprovalGate {
             return Ok(None);
         };
 
-        let workspace = (scope != Scope::App).then_some(action.workspace_id.as_str());
+        let workspace = (scope != Scope::App).then(|| action.workspace()).flatten();
         let c = self.db.c();
         let now = iso8601_utc_now();
         expire(&c, &now)?;

@@ -1,8 +1,10 @@
-//! Read-only Git visibility (M9, ADR 0005 / 0017): branch, state, changed files and bounded diffs by
-//! shelling out to the installed `git` with hardened options. Nothing here ever changes a repository.
+//! Git visibility (M9, ADR 0005 / 0017): branch, state, changed files and bounded diffs by shelling out
+//! to the installed `git` with hardened options. Everything here is read-only except [`worktree`],
+//! which creates and removes worktrees on request and only after an approval (ADR 0028).
 
 mod run;
 pub mod status;
+pub mod worktree;
 
 pub use run::{find_git, STATUS_TIMEOUT};
 pub use status::{FileEntry, Kind};

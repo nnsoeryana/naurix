@@ -102,6 +102,7 @@ pub async fn terminal_spawn(
         title: title.unwrap_or_else(|| "Terminal".into()),
         adapter_id: None,
         approval_id: None,
+        worktree_id: None,
         cwd,
     };
     start_session(

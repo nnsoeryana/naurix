@@ -365,3 +365,23 @@ fn history_is_capped_and_never_drops_an_active_grant() {
     assert_eq!(g.history(1000).unwrap().len(), 200);
     assert!(allowed(&g, &keep), "the standing grant survived pruning");
 }
+
+#[test]
+fn an_action_with_no_workspace_can_still_be_approved_once_and_is_spent_once() {
+    // For example removing a worktree whose workspace is gone: there is no workspace id to store.
+    let e = env(1);
+    let g = ApprovalGate::new(e.db.clone());
+    let a = action("", &["orphan-worktree"], &[Scope::Once]);
+    assert_eq!(a.workspace(), None);
+    let r = request(&g, &a);
+    g.decide(&r.id, Decision::Allow(Scope::Once)).unwrap();
+    assert!(allowed(&g, &a));
+    assert!(!allowed(&g, &a), "spent");
+    // It must not authorize the same thing in a real workspace.
+    let r2 = request(&g, &a);
+    g.decide(&r2.id, Decision::Allow(Scope::Once)).unwrap();
+    assert!(!allowed(
+        &g,
+        &action(&e.ws[0], &["orphan-worktree"], &[Scope::Once])
+    ));
+}

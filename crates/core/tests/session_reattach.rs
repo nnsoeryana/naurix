@@ -35,6 +35,7 @@ fn sh(script: &str) -> SessionLaunch {
         title: "t".into(),
         adapter_id: None,
         approval_id: None,
+        worktree_id: None,
         cwd: None,
     }
 }

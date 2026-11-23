@@ -68,6 +68,8 @@ pub struct SessionLaunch {
     pub adapter_id: Option<String>,
     /// The approval that allowed this launch, recorded on the session row for traceability (ADR 0027).
     pub approval_id: Option<String>,
+    /// The Naurix-created worktree this session runs in, if any (ADR 0028). Set only by the backend.
+    pub worktree_id: Option<String>,
     /// Start somewhere other than the workspace folder. Only ever set by the backend.
     pub cwd: Option<PathBuf>,
 }
@@ -81,6 +83,7 @@ pub struct SessionInfo {
     pub title: String,
     pub adapter_id: Option<String>,
     pub started_at: String,
+    pub worktree_id: Option<String>,
     /// `None` while the process is running.
     pub exit: Option<ExitInfo>,
 }
@@ -125,6 +128,7 @@ struct Entry {
     title: String,
     adapter_id: Option<String>,
     started_at: String,
+    worktree_id: Option<String>,
     out: Mutex<Output>,
 }
 
@@ -167,6 +171,7 @@ impl Entry {
             title: self.title.clone(),
             adapter_id: self.adapter_id.clone(),
             started_at: self.started_at.clone(),
+            worktree_id: self.worktree_id.clone(),
             exit: self.out.lock().unwrap().exit.clone(),
         }
     }
@@ -309,6 +314,12 @@ impl SessionManager {
                 return Err(e.into());
             }
         };
+        if let Some(w) = launch.worktree_id.as_deref() {
+            if let Err(e) = self.db.set_session_worktree(&db_id, w) {
+                let _ = self.sup.terminate(id, self.grace);
+                return Err(e.into());
+            }
+        }
         let entry = Arc::new(Entry {
             flow: Arc::new(Flow::new()),
             workspace_id: ws.id.clone(),
@@ -316,6 +327,7 @@ impl SessionManager {
             title,
             adapter_id: launch.adapter_id.clone(),
             started_at: iso8601_utc_now(),
+            worktree_id: launch.worktree_id.clone(),
             out: Mutex::new(Output {
                 ring: VecDeque::new(),
                 limit: self.replay_limit,

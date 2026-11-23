@@ -175,6 +175,18 @@ const MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX approvals_lookup ON approvals(class, fingerprint, state);
      ALTER TABLE sessions ADD COLUMN approval_id TEXT;",
+    // 5: worktrees Naurix created for agents (ADR 0028). Metadata only. Removing a workspace never deletes
+    // project files, so it does not delete worktree folders either: the row stays with the workspace cleared.
+    "CREATE TABLE worktrees (
+       id TEXT PRIMARY KEY,
+       workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+       repo_root TEXT NOT NULL,
+       path TEXT NOT NULL UNIQUE,
+       branch TEXT NOT NULL,
+       base_commit TEXT NOT NULL,
+       created_at TEXT NOT NULL
+     );
+     ALTER TABLE sessions ADD COLUMN worktree_id TEXT;",
 ];
 
 pub struct Db {
@@ -351,6 +363,15 @@ impl Db {
             params![id, workspace_id, kind.as_str(), title, adapter_id, now, approval_id],
         )?;
         Ok(id)
+    }
+
+    /// Record which Naurix-created worktree a session runs in (ADR 0028).
+    pub fn set_session_worktree(&self, session_id: &str, worktree_id: &str) -> Result<(), DbError> {
+        self.c().execute(
+            "UPDATE sessions SET worktree_id = ?1 WHERE id = ?2",
+            params![worktree_id, session_id],
+        )?;
+        Ok(())
     }
 
     pub fn finish_session(&self, id: &str, lifecycle: &str) -> Result<(), DbError> {

@@ -29,6 +29,7 @@ fn launch(kind: SessionKind, script: &str) -> SessionLaunch {
         title: "t".into(),
         adapter_id: matches!(kind, SessionKind::Agent).then(|| "mock".to_string()),
         approval_id: None,
+        worktree_id: None,
         cwd: None,
     }
 }
