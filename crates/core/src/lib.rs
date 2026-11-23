@@ -11,6 +11,7 @@ pub mod platform;
 pub mod pty;
 pub mod session;
 pub mod settings;
+pub mod signals;
 pub mod skills;
 
 /// Static information about the running build.

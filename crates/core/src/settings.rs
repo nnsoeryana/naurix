@@ -150,12 +150,27 @@ pub const AGENTS_DEFAULT: u8 = 4;
 pub struct Agents {
     /// A resource guard, not a safety control: launching another agent at the limit fails and starts nothing.
     pub max_concurrent: u8,
+    /// Ids of agents the user allowed to report their status (ADR 0029). Off for everyone by default.
+    pub status_signals: Vec<String>,
+}
+
+/// Agents that can report status: only those whose adapter has a Verified capability.
+pub fn supports_status(id: &str) -> bool {
+    crate::agents::adapter_for(id).is_some_and(|a| a.status_args().is_some())
+}
+
+impl Agents {
+    /// Whether the user opted `id` in and it can report status here.
+    pub fn status_enabled(&self, id: &str) -> bool {
+        self.status_signals.iter().any(|a| a == id) && supports_status(id)
+    }
 }
 
 impl Default for Agents {
     fn default() -> Self {
         Self {
             max_concurrent: AGENTS_DEFAULT,
+            status_signals: Vec::new(),
         }
     }
 }
@@ -222,6 +237,16 @@ pub fn validate(s: &Settings) -> Result<Settings, DbError> {
             "Agents running at once must be between {AGENTS_MIN} and {AGENTS_MAX}."
         ));
     }
+    if let Some(id) = s
+        .agents
+        .status_signals
+        .iter()
+        .find(|id| !supports_status(id))
+    {
+        return bad(&format!("'{id}' cannot report its status."));
+    }
+    s.agents.status_signals.sort();
+    s.agents.status_signals.dedup();
     s.terminal.shell_path = match s.terminal.shell_path.as_deref().map(str::trim) {
         None | Some("") => None,
         Some(p) if is_executable_file(p) => Some(p.to_string()),
@@ -260,6 +285,9 @@ fn sanitize(mut s: Settings) -> Settings {
     if !(AGENTS_MIN..=AGENTS_MAX).contains(&s.agents.max_concurrent) {
         s.agents.max_concurrent = AGENTS_DEFAULT;
     }
+    s.agents.status_signals.retain(|id| supports_status(id));
+    s.agents.status_signals.sort();
+    s.agents.status_signals.dedup();
     s.terminal.shell_path = s
         .terminal
         .shell_path
@@ -575,5 +603,28 @@ mod tests {
             "/bin/sh",
             "a stale configured shell falls back"
         );
+    }
+
+    #[test]
+    fn status_signals_are_off_by_default_and_only_for_agents_that_can_report() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(get(&db).unwrap().agents.status_signals.is_empty());
+        assert!(!get(&db).unwrap().agents.status_enabled("claude-code"));
+        let mut s = Settings::default();
+        s.agents.status_signals = vec!["claude-code".into(), "claude-code".into()];
+        let saved = update(&db, &s).unwrap();
+        assert_eq!(saved.agents.status_signals, ["claude-code"]);
+        assert_eq!(saved.agents.status_enabled("claude-code"), cfg!(unix));
+        for bad in ["codex", "custom-1", ""] {
+            s.agents.status_signals = vec![bad.into()];
+            assert!(update(&db, &s).is_err(), "{bad:?} cannot report status");
+        }
+        // A stored list with an unusable entry is cleaned on read, not trusted.
+        db.set_setting(
+            KEY,
+            r#"{"agents":{"statusSignals":["claude-code","nope"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(get(&db).unwrap().agents.status_signals, ["claude-code"]);
     }
 }

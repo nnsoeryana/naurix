@@ -154,7 +154,20 @@ impl<'a> AgentStore<'a> {
         id: &str,
         dirs: &[PathBuf],
     ) -> Result<(AgentDef, LaunchPlan), AgentError> {
-        let def = self.get(id)?;
+        self.prepare_launch_with(id, dirs, &[])
+    }
+
+    /// Like [`prepare_launch`](Self::prepare_launch) with `extra_args` appended to the agent's
+    /// arguments before anything is derived from them, so the reviewed command and its approval
+    /// fingerprint cover exactly what will run (used for status hooks, ADR 0029).
+    pub fn prepare_launch_with(
+        &self,
+        id: &str,
+        dirs: &[PathBuf],
+        extra_args: &[String],
+    ) -> Result<(AgentDef, LaunchPlan), AgentError> {
+        let mut def = self.get(id)?;
+        def.args.extend(extra_args.iter().cloned());
         let plan = plan_launch(&def, self.path_override(id)?.as_deref(), dirs)?;
         Ok((def, plan))
     }

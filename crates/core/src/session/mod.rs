@@ -16,12 +16,16 @@ use crate::pty::{
     ExitInfo, Flow, Outbound, PtyError, SessionEvent, SessionId, SpawnSpec, Supervisor,
     TerminateOutcome, MAX_BATCH_BYTES,
 };
+use crate::signals::{SignalKind, SpoolFollower};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// How often a spool file is checked for new status words (ADR 0029).
+const STATUS_POLL: Duration = Duration::from_millis(250);
 
 /// Replay buffer per session. A hypothesis (ADR 0026, ADR 0006): confirm with a recorded benchmark
 /// before documenting any memory figure.
@@ -84,8 +88,18 @@ pub struct SessionInfo {
     pub adapter_id: Option<String>,
     pub started_at: String,
     pub worktree_id: Option<String>,
+    /// The agent's last reported status, only while the process runs and only if the agent reports
+    /// one (ADR 0029). `None` means "no signal", never "idle".
+    pub status: Option<StatusInfo>,
     /// `None` while the process is running.
     pub exit: Option<ExitInfo>,
+}
+
+/// A status an agent reported, and when Naurix received it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusInfo {
+    pub kind: SignalKind,
+    pub at: String,
 }
 
 impl SessionInfo {
@@ -129,6 +143,7 @@ struct Entry {
     adapter_id: Option<String>,
     started_at: String,
     worktree_id: Option<String>,
+    status: Mutex<Option<StatusInfo>>,
     out: Mutex<Output>,
 }
 
@@ -164,6 +179,11 @@ impl Entry {
     }
 
     fn info(&self, id: SessionId) -> SessionInfo {
+        let exit = self.out.lock().unwrap().exit.clone();
+        let status = match exit {
+            None => self.status.lock().unwrap().clone(),
+            Some(_) => None,
+        };
         SessionInfo {
             id,
             workspace_id: self.workspace_id.clone(),
@@ -172,7 +192,8 @@ impl Entry {
             adapter_id: self.adapter_id.clone(),
             started_at: self.started_at.clone(),
             worktree_id: self.worktree_id.clone(),
-            exit: self.out.lock().unwrap().exit.clone(),
+            status,
+            exit,
         }
     }
 
@@ -328,6 +349,7 @@ impl SessionManager {
             adapter_id: launch.adapter_id.clone(),
             started_at: iso8601_utc_now(),
             worktree_id: launch.worktree_id.clone(),
+            status: Mutex::new(None),
             out: Mutex::new(Output {
                 ring: VecDeque::new(),
                 limit: self.replay_limit,
@@ -361,6 +383,53 @@ impl SessionManager {
         });
         let _ = gate_tx.send(());
         Ok(id)
+    }
+
+    /// Follow `spool` for status words from the agent in session `id` (ADR 0029). Each new word
+    /// becomes the session's status and a [`Event::SessionStatus`]. The file is removed when the
+    /// process has exited. Safe to call right after `start`: the file is read from its beginning.
+    pub fn watch_status(
+        self: &Arc<Self>,
+        id: SessionId,
+        spool: PathBuf,
+    ) -> Result<(), SessionError> {
+        let entry = self.entry(id)?;
+        let hub = self.clone();
+        std::thread::Builder::new()
+            .name(format!("status-{id}"))
+            .spawn(move || {
+                let mut follower = SpoolFollower::new(spool.clone());
+                loop {
+                    let exited = entry.out.lock().unwrap().exit.is_some();
+                    // One last read after exit would only add a status for a process that is gone.
+                    if !exited {
+                        for kind in follower.poll() {
+                            let at = iso8601_utc_now();
+                            *entry.status.lock().unwrap() = Some(StatusInfo {
+                                kind,
+                                at: at.clone(),
+                            });
+                            hub.events.publish(Event::SessionStatus {
+                                session: id,
+                                workspace_id: entry.workspace_id.clone(),
+                                kind,
+                                at,
+                            });
+                        }
+                    }
+                    if exited || follower.stopped() {
+                        break;
+                    }
+                    std::thread::sleep(STATUS_POLL);
+                }
+                // A stopped (oversize) follower leaves the file until the process ends.
+                while entry.out.lock().unwrap().exit.is_none() {
+                    std::thread::sleep(STATUS_POLL);
+                }
+                let _ = std::fs::remove_file(&spool);
+            })
+            .map(|_| ())
+            .map_err(|e| SessionError::Thread(e.to_string()))
     }
 
     fn entry(&self, id: SessionId) -> Result<Arc<Entry>, SessionError> {

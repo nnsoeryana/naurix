@@ -5,7 +5,9 @@
 //! Only behaviours that exist today are here. Structured events, headless run, status and resume
 //! are added when their first capability is verified (ADR 0014, ADR 0022), not before.
 
-use super::adapter::{AdapterInfo, ANTIGRAVITY_CLI, CLAUDE_CODE, CODEX, GEMINI_CLI, OPENCODE};
+use super::adapter::{
+    AdapterInfo, Feature, ANTIGRAVITY_CLI, CLAUDE_CODE, CODEX, GEMINI_CLI, OPENCODE,
+};
 use std::path::{Path, PathBuf};
 
 /// File layouts Naurix has verified for MCP config, named after the agent each was captured from.
@@ -53,6 +55,14 @@ pub trait AgentAdapter: Sync {
     }
 
     fn skill_compat(&self, facts: SkillFacts) -> SkillCompat;
+
+    /// Launch arguments that make this agent report its status (ADR 0029), with the spool path
+    /// still a placeholder (see `signals::SPOOL_PLACEHOLDER`). `None` unless the capability is
+    /// Verified for this agent and supported on this platform; callers must also have the user's
+    /// opt-in. Nothing is written to the agent's own configuration.
+    fn status_args(&self) -> Option<Vec<String>> {
+        None
+    }
 }
 
 struct ClaudeCode;
@@ -64,6 +74,15 @@ struct OpenCode;
 impl AgentAdapter for ClaudeCode {
     fn info(&self) -> &'static AdapterInfo {
         &CLAUDE_CODE
+    }
+    fn status_args(&self) -> Option<Vec<String>> {
+        // The hook command is a shell `printf`, so this is Unix only until Windows is verified.
+        (cfg!(unix) && self.info().acts_on(Feature::StatusSignals)).then(|| {
+            vec![
+                "--settings".to_string(),
+                crate::signals::claude_hook_settings(),
+            ]
+        })
     }
     fn mcp_target(&self, workspace_root: &Path, _home: &Path) -> Option<McpTarget> {
         Some(McpTarget {

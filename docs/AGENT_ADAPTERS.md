@@ -20,7 +20,7 @@ The same data lives in code (`crates/core/src/agents/adapter.rs`), is shown in t
 | **Launch in a terminal** | Verified (generic PTY; real CLI not started by tests) | same | same | same | same |
 | **MCP configuration** | **Verified**, project scope only | Documented only | Documented only | Documented only | **Verified** for the flat shape of 1.18.10 |
 | **Skills** | Accepted: link only | Accepted: link only | Unsupported (not researched) | Accepted: link only | Accepted: link only |
-| **Task status (waiting / done)** | Documented only (hooks, opt-in) | Documented only (hooks) | Unsupported | Unsupported | Documented only (server events) |
+| **Task status (waiting / done)** | **Verified** for hooks (opt-in, ADR 0029; Claude Code 2.1.329) | Documented only (hooks) | Unsupported | Unsupported | Documented only (server events) |
 | **Resume sessions** | Documented only | Unsupported | Unsupported | Unsupported | Unsupported |
 | **Verified with** | 2.1.322 | – | – | – | 1.18.10 |
 
@@ -30,7 +30,7 @@ The same data lives in code (`crates/core/src/agents/adapter.rs`), is shown in t
 - **MCP** ([docs](https://code.claude.com/docs/en/mcp)): scopes *local* and *user* are stored in `~/.claude.json` (a large file that also holds unrelated state), *project* in `.mcp.json` at the project root. **Verified fixture** (`claude mcp add --scope project …`): `{"mcpServers": {"<name>": {"type": "stdio", "command": "…", "args": [...], "env": {...}}}}` and `{"type": "http", "url": "…", "headers": {...}}`. `${VAR}` / `${VAR:-default}` expansion is documented. Project servers prompt for approval in interactive sessions. *Decision:* Naurix will only ever write the **project** `.mcp.json`; it will not edit `~/.claude.json`.
 - **Gotcha found by running it:** `--env` is variadic and swallows the next word, so `--env K=v name -- cmd` fails; use `name -e K=v -- cmd`. (Relevant only if Naurix ever shells out; it writes files directly.)
 - **Skills** ([docs](https://code.claude.com/docs/en/skills)): `~/.claude/skills/<name>/SKILL.md` (personal) and `.claude/skills/<name>/SKILL.md` (project); frontmatter fields are optional (`name` defaults to the folder, `description` recommended); changes are picked up live; skills may bundle scripts that **Claude** runs; on/off via deleting the folder or `skillOverrides` in settings.
-- **Status signals** ([hooks](https://code.claude.com/docs/en/hooks)): events `Notification` (matchers incl. `permission_prompt`, `idle_prompt`), `PermissionRequest`, `Stop`, … configured in `~/.claude/settings.json` or project settings. Needs a hook entry in the user's settings: **not added** without an explicit, reversible opt-in.
+- **Status signals** ([hooks](https://code.claude.com/docs/en/hooks)): events `Notification` (matchers incl. `permission_prompt`, `idle_prompt`), `PermissionRequest`, `Stop`, … configured in `~/.claude/settings.json` or project settings. **Verified** (Claude Code 2.1.329, interactive TUI and `-p`, ADR 0029): Naurix injects hooks for one launch with `--settings` and writes nothing to user or project settings. Opt-in per agent. The hooks append one fixed word (`working`, `awaiting_approval`, `idle`, `turn_done`) to a private file and never read the payload, which contains prompts, answers and tool input. Not verified: a refused approval, hook failure or timeout, cost per tool call, Windows, Linux. Note: a session in an auto-approving permission mode asks nothing, so `PermissionRequest` does not fire (observed; verified with `--permission-mode default`).
 - **CLI** ([reference](https://code.claude.com/docs/en/cli-reference)): `--version`, `--continue/-c`, `--resume/-r`, `-p` with `--output-format`, `--mcp-config`, `--strict-mcp-config`, `--settings`.
 
 ### OpenAI Codex CLI (docs now served from `learn.chatgpt.com`)
@@ -60,7 +60,7 @@ Both verified CLIs expand environment references in their MCP config: Claude Cod
 ## Consequences for the next milestones
 1. **M7 (MCP) — done (ADR 0015):** sync is implemented only for what is Verified: **Claude Code project `.mcp.json`** and **OpenCode flat shape**. Codex/Gemini/Antigravity adapters stay "documented only" until someone can run those CLIs and capture fixtures (or the maintainer confirms their formats). Every write is dry-run → approve → backup → reversible, and only touches entries Naurix created.
 2. **M8 (Skills) — done (ADR 0016):** there is no account-free way to confirm that an agent *discovers* a skill, so the maintainer decided on 2026-11-19 that a reversible symlink into the documented folder is acceptable (level *Documented, accepted*). Note the overlap: OpenCode also reads `~/.claude/skills` and `~/.agents/skills`, and Codex and Antigravity share `.agents/skills`, so one central store can be symlinked once per distinct directory.
-3. **Status:** stays *process state only*. Reliable "waiting/done" needs opt-in hooks (Claude/Codex) or an attached server (OpenCode), each a separate, explicitly approved feature.
+3. **Status:** *process state only* for every agent except Claude Code, which reports it through opt-in per-launch hooks (ADR 0029). Codex hooks and OpenCode's server events each need their own verification.
 
 ## Open questions for the maintainer
 1. Keep the added **Antigravity CLI** preset? (Recommended: yes.)

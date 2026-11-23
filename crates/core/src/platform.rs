@@ -208,6 +208,35 @@ pub fn remove_symlink(link: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Create `path` (and parents) readable only by the current user. On Windows the folder inherits the
+/// permissions of its parent (the per-user data directory), which is already private to the user.
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Create a new empty file readable and writable only by the current user. Fails if it exists.
+pub fn create_private_file(path: &Path) -> std::io::Result<()> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path).map(|_| ())
+}
+
 /// Unix permission bits of a file; 0 where the OS has none (Windows).
 pub fn file_mode(md: &std::fs::Metadata) -> u32 {
     #[cfg(unix)]

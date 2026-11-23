@@ -7,6 +7,7 @@
 
 use crate::persistence::SessionKind;
 use crate::pty::SessionId;
+use crate::signals::SignalKind;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Mutex;
 
@@ -26,6 +27,13 @@ pub enum Event {
         workspace_id: String,
         code: Option<u32>,
         signal: Option<String>,
+    },
+    /// An agent reported its status (ADR 0029). Only the fixed kind and the time; never content.
+    SessionStatus {
+        session: SessionId,
+        workspace_id: String,
+        kind: SignalKind,
+        at: String,
     },
 }
 

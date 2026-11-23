@@ -104,12 +104,14 @@ fn only_verified_capabilities_are_acted_on() {
             "no skills fact is *verified* yet: {}",
             a.agent_id
         );
-        // Nothing has been verified for these yet, so nothing may act on them (ADR 0011 / 0014).
-        assert!(
-            !a.acts_on(Feature::StatusSignals),
+        // Status signals are verified for Claude Code only (ADR 0029); nothing else may act on them.
+        assert_eq!(
+            a.acts_on(Feature::StatusSignals),
+            a.agent_id == "claude-code",
             "status signals for {}",
             a.agent_id
         );
+        // Nothing has been verified for resume yet (ADR 0011 / 0014).
         assert!(
             !a.acts_on(Feature::SessionResume),
             "resume for {}",

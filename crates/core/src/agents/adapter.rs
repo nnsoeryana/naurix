@@ -141,7 +141,11 @@ pub static CLAUDE_CODE: AdapterInfo = AdapterInfo {
             detail: "Project scope only: `.mcp.json` in the workspace, key `mcpServers`; stdio = command/args/env, http = type/url/headers. User and local scope live in `~/.claude.json`, which also holds unrelated state, so Naurix will not edit it. `${VAR}` references in `env`, `args` and `headers` are expanded from the environment (verified), so secrets can stay out of the file.",
         },
         accepted(Feature::Skills, "https://code.claude.com/docs/en/skills", "`~/.claude/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`; picked up live; skills may bundle scripts that Claude (not Naurix) runs."),
-        doc(Feature::StatusSignals, "https://code.claude.com/docs/en/hooks", "Hook events `Notification` (matchers `permission_prompt`, `idle_prompt`) and `Stop` exist but require entries in the user's settings.json; not added without an explicit, reversible opt-in."),
+        CapabilityInfo {
+            feature: Feature::StatusSignals,
+            level: Level::Verified { evidence: "Run against Claude Code 2.1.329 on 2026-11-23 with hooks injected per launch through `--settings` (ADR 0029): `UserPromptSubmit`, `PostToolUse` (working), `PermissionRequest` (awaiting approval, with `--permission-mode default`), `Notification` matcher `idle_prompt` (about a minute after a turn) and `Stop` (turn done) all fired in the interactive TUI, `UserPromptSubmit`, `PermissionRequest` and `Stop` also with `-p`; hooks from `--settings` run alongside the project's own." },
+            detail: "Opt-in per agent (Settings). Hooks come from `--settings` for that launch only; the user's settings.json is never written. Each hook appends one fixed word to a private file and never reads the payload (which contains prompts, answers and tool input). Not verified: a refused approval, hook failure or timeout, the cost per tool call, Windows and Linux. Only on Unix for now (the hook command is a shell `printf`).",
+        },
         doc(Feature::SessionResume, "https://code.claude.com/docs/en/cli-reference", "`--continue`/`-c` and `--resume`/`-r`."),
     ],
     config_paths: &[
