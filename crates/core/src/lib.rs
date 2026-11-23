@@ -6,6 +6,7 @@ pub mod credential;
 pub mod events;
 pub mod git;
 pub mod mcp;
+pub mod memory;
 pub mod persistence;
 pub mod platform;
 pub mod pty;

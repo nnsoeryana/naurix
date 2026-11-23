@@ -236,6 +236,31 @@ const MIGRATIONS: &[&str] = &[
        depends_on TEXT NOT NULL REFERENCES run_steps(id) ON DELETE CASCADE,
        PRIMARY KEY (run_step_id, depends_on)
      );",
+    // 7: opt-in project memory (ADR 0031). Notes are text the user typed; nothing is captured. `rid` is a
+    // stable integer key for the full-text index (a TEXT key's implicit rowid can change on VACUUM). The
+    // triggers keep memory_fts in step, including when a workspace removal cascades to its notes.
+    "ALTER TABLE workspaces ADD COLUMN memory_enabled INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE memory_notes (
+       rid INTEGER PRIMARY KEY AUTOINCREMENT,
+       id TEXT NOT NULL UNIQUE,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       title TEXT NOT NULL,
+       body TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     );
+     CREATE INDEX memory_notes_workspace ON memory_notes(workspace_id, updated_at);
+     CREATE VIRTUAL TABLE memory_fts USING fts5(title, body, content='memory_notes', content_rowid='rid', tokenize='unicode61 remove_diacritics 2');
+     CREATE TRIGGER memory_ai AFTER INSERT ON memory_notes BEGIN
+       INSERT INTO memory_fts(rowid, title, body) VALUES (new.rid, new.title, new.body);
+     END;
+     CREATE TRIGGER memory_ad AFTER DELETE ON memory_notes BEGIN
+       INSERT INTO memory_fts(memory_fts, rowid, title, body) VALUES ('delete', old.rid, old.title, old.body);
+     END;
+     CREATE TRIGGER memory_au AFTER UPDATE ON memory_notes BEGIN
+       INSERT INTO memory_fts(memory_fts, rowid, title, body) VALUES ('delete', old.rid, old.title, old.body);
+       INSERT INTO memory_fts(rowid, title, body) VALUES (new.rid, new.title, new.body);
+     END;",
 ];
 
 pub struct Db {
