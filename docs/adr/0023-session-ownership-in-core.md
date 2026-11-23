@@ -1,5 +1,5 @@
 # ADR 0023 — Session ownership moves into Core (orchestration stage 1)
-**Status:** Proposed (maintainer to accept). Implements stage 1 of ADR 0022 only. **Behaviour-preserving refactor: no user-visible change.**
+**Status:** Accepted (2026-11-23, maintainer). Implements stage 1 of ADR 0022 only. **Behaviour-preserving refactor: no user-visible change.**
 
 **Context:** ADR 0022 requires Core to own session start and lifecycle, with Tauri as a bridge. Today `src-tauri/src/terminal.rs` holds `Terminals`, `Entry`, `Launch` and `start_session`: it validates the workspace folder, spawns through `Supervisor`, inserts the `sessions` row, keeps the per-session flow-control state, runs the output-forwarding thread, and finishes the DB row on exit. That is domain logic in the Tauri layer, and it ties session start to Tauri `Channel`s.
 

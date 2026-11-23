@@ -1,5 +1,5 @@
 # ADR 0025 — `AgentAdapter` trait for per-agent behaviour (orchestration stage 3)
-**Status:** Proposed (maintainer to accept). Implements stage 3 of ADR 0022. **Behaviour-preserving: no user-visible change.**
+**Status:** Accepted (2026-11-23, maintainer). Implements stage 3 of ADR 0022. **Behaviour-preserving: no user-visible change.**
 
 **Context:** `agents/adapter.rs` holds per-agent *facts* (a static table with verification levels, ADR 0014). Per-agent *behaviour* is scattered as literal agent-id checks: `mcp/sync.rs` (`target_path`, `shape_of`, a Claude-only note) and `skills/scan.rs` (`compat`, a hard-coded list of five ids). Adding an agent means editing those files. ADR 0022 requires that adding an agent touch only its adapter.
 

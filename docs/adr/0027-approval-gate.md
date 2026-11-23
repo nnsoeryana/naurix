@@ -1,5 +1,5 @@
 # ADR 0027 — Central approval gate (orchestration stage 5)
-**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements the approval-gate half of stage 5 of ADR 0022 and proposes moving the Task/Run model to stage 8 (see §6).
+**Status:** Accepted (2026-11-23, maintainer). **Implemented; see the implementation log at the end for what is not yet verified.** Implements the approval-gate half of stage 5 of ADR 0022 and proposes moving the Task/Run model to stage 8 (see §6).
 
 ## Context (from the code, 2026-11-23)
 ADR 0022 requires one centralized, scoped approval gate for every agent action. Today there are **four separate mechanisms**, each with its own storage and UI:

@@ -1,5 +1,5 @@
 # ADR 0024 — Domain event bus in Core (orchestration stage 2)
-**Status:** Proposed (maintainer to accept). Implements stage 2 of ADR 0022. **No user-visible change.**
+**Status:** Accepted (2026-11-23, maintainer). Implements stage 2 of ADR 0022. **No user-visible change.**
 
 **Context:** ADR 0022 calls for domain events that several parties can consume (UI, later the run/workflow engine, audit). The audit found no event mechanism: the only push flows are per-session Tauri `Channel`s bound to one webview call. Core has no way to say "a session started" or "a session ended" to anyone except the one caller that holds the channel. `docs/TECHNICAL_DESIGN.md` §11 already names a `session://lifecycle` event.
 

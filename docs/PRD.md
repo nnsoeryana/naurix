@@ -171,7 +171,7 @@ Settings sections: General, Terminal, AI Agents, MCP Integrations, Agent Skills,
 
 ### 5.9 Orchestration workspace (post-MVP, ADR 0022)
 
-Nothing in this section is implemented yet. It is delivered in the stages listed in ADR 0022, each leaving the app runnable. None of it may be required to use the terminal.
+Delivered in the stages listed in ADR 0022, each leaving the app runnable. Implemented so far (stages 1–6, ADR 0023–0028): SES-001–004, ORCH-001–004, ORCH-006, APR-001–003 and GIT-006; still to do: ORCH-005, WF-001 and MEM-001–008. Visual and real-agent checks are listed as not verified in each ADR's implementation log. None of it may be required to use the terminal.
 
 | ID | Priority | Requirement | Acceptance criteria |
 |---|---|---|---|
@@ -182,11 +182,11 @@ Nothing in this section is implemented yet. It is delivered in the stages listed
 | ORCH-001 | P1 | Agent Runtime separate from Terminal Runtime | Terminal sessions work with the agent runtime absent or disabled; the agent runtime starts and stops processes only through the terminal runtime |
 | ORCH-002 | P1 | Adapter trait with per-capability gating | Behaviour per agent lives in its adapter; a capability is usable only when its level is Verified (or maintainer-accepted for a reversible action). MCP verification does not imply headless, structured events, status or resume |
 | ORCH-003 | P1 | Agents added through adapters | Codex, Gemini CLI, Antigravity CLI and custom CLIs start as PTY-only adapters and gain capabilities one at a time as each is verified |
-| ORCH-004 | P1 | Concurrent runs | Several agent runs can be active at once, with a user-visible limit; state shown only from process state or verified signals |
+| ORCH-004 | P1 | Concurrent runs | Several agent runs can be active at once, with a user-visible limit (Settings, default 4, range 1–16; a refused launch spends no approval); state shown only from process state or verified signals |
 | ORCH-005 | P2 | Tasks, runs and dependencies | Task and run metadata with dependency edges; no output or prompts stored |
 | ORCH-006 | P1 | Opt-in worktree isolation | A run may request a Git worktree; creation needs approval at "once" scope and is never silent (see GIT-006) |
 | APR-001 | P1 | Central approval gate | Launching an agent, automated input, run or workflow step, worktree creation and agent-config writes all pass one gate that records and can revoke decisions |
-| APR-002 | P1 | Scoped approvals | Scopes: once, session, run/workflow run, workspace. Bound to a fingerprint of the reviewed target; a changed target needs a new approval. Git mutations and agent-config writes are "once" only. No "approve everything" scope |
+| APR-002 | P1 | Scoped approvals | Scopes: once, workspace and app today (ADR 0027); session and run/workflow run arrive with stage 8. Bound to a fingerprint of the reviewed target; a changed target needs a new approval. Git mutations and agent-config writes are "once" only. No "approve everything" scope |
 | APR-003 | P1 | Approval visibility | Approvals are listed in Settings (Security), revocable, cleared with the workspace; stored as metadata only |
 | WF-001 | P2 | Reusable workflows | A workflow is a saved set of tasks and dependencies, runnable many times; every step goes through the approval gate |
 | MEM-001 | P2 | Opt-in per workspace | Memory is off until the user enables it for that workspace |

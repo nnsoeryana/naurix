@@ -1,5 +1,5 @@
 # ADR 0028 — Opt-in Git worktree isolation for agents (orchestration stage 6)
-**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements stage 6 of ADR 0022 (§4.6) and the P2 requirement GIT-006. It makes the first **writing** use of Git in Naurix, which amends ADR 0005 and ADR 0017 ("nothing writes") for exactly the two operations below.
+**Status:** Accepted (2026-11-23, maintainer). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 6 of ADR 0022 (§4.6) and the P2 requirement GIT-006. It makes the first **writing** use of Git in Naurix, which amends ADR 0005 and ADR 0017 ("nothing writes") for exactly the two operations below.
 
 ## Context
 Two agents working in the same folder can overwrite each other's files, and nothing tells the user. A Git worktree gives each agent its own checkout of the same repository, on its own branch, in its own folder, so work stays separate and is merged with ordinary Git afterwards.

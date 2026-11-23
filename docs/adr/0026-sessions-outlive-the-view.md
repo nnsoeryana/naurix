@@ -1,5 +1,5 @@
 # ADR 0026 — Sessions outlive the view: detach, reattach and window close (orchestration stage 4)
-**Status:** Proposed (maintainer to accept; the four open decisions were answered on 2026-11-21, see the end). **Design only; no code.** Implements the session-lifecycle decisions of ADR 0022 §2 and resolves the known quirks recorded in ADR 0023 and ADR 0024. This is the riskiest stage: it changes who owns a session's lifetime.
+**Status:** Accepted (2026-11-23, maintainer). **Implemented; see the implementation log at the end for what is not yet verified.** Implements the session-lifecycle decisions of ADR 0022 §2 and resolves the known quirks recorded in ADR 0023 and ADR 0024. This is the riskiest stage: it changes who owns a session's lifetime.
 
 ## Context (from the code, 2026-11-21)
 - **Session lifetime is bound to the React component.** `TerminalView` spawns its session on mount and calls `terminate` on unmount (`src/features/terminal/TerminalView.tsx`). Closing a pane, closing a tab and unmounting for any other reason all kill the process.

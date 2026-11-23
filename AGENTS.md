@@ -55,7 +55,7 @@ For each task:
 
 ## Scope control
 
-Orchestration is in scope only in the stages defined by ADR 0022, in that order: (1) move session start and ownership into Core with one stable session id; (2) event bus; (3) `AgentAdapter` trait, no behaviour change; (4) sessions independent of webview and window; (5) task/run plus approval gate; (6) opt-in worktree isolation; (7) structured-signal spikes; (8) workflows; (9) memory. Implement a stage only when the maintainer asks for it, and write the follow-up ADR it needs first. Each stage must leave the app runnable, keep existing terminal tests green, and avoid unrelated refactoring.
+Orchestration is in scope only in the stages defined by ADR 0022, in that order: (1) move session start and ownership into Core with one stable session id; (2) event bus; (3) `AgentAdapter` trait, no behaviour change; (4) sessions independent of webview and window; (5) approval gate and agent concurrency limit (done); (6) opt-in worktree isolation (done); (7) structured-signal spikes; (8) workflows, including task/run; (9) memory. Stages 1–6 are implemented (ADR 0023–0028). Implement a stage only when the maintainer asks for it, and write the follow-up ADR it needs first. Each stage must leave the app runnable, keep existing terminal tests green, and avoid unrelated refactoring.
 
 Still out of scope unless explicitly requested and approved by a new ADR: cloud execution or sync, team collaboration, a full IDE, a background daemon, and automatic memory capture. Do not introduce speculative abstractions that are not needed by the current stage.
 
