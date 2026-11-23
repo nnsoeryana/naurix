@@ -26,8 +26,9 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0019](0019-no-credential-storage.md) | Naurix stores no credentials | Accepted (partially implemented) |
 | [0020](0020-theme-system.md) | Theme system | Accepted |
 | [0021](0021-windows-linux-readiness.md) | Windows and Linux readiness | Accepted (implemented, unvalidated) |
-| [0022](0022-orchestration-workspace-scope.md) | Orchestration workspace scope, session lifecycle and shared project memory | Accepted (documentation only; nothing implemented yet) |
+| [0022](0022-orchestration-workspace-scope.md) | Orchestration workspace scope, session lifecycle and shared project memory | Accepted |
 | [0023](0023-session-ownership-in-core.md) | Session ownership moves into Core (orchestration stage 1) | Proposed |
 | [0024](0024-domain-event-bus.md) | Domain event bus in Core (orchestration stage 2) | Proposed |
 | [0025](0025-agent-adapter-trait.md) | `AgentAdapter` trait for per-agent behaviour (orchestration stage 3) | Proposed |
-| [0026](0026-sessions-outlive-the-view.md) | Sessions outlive the view: detach, reattach and window close (orchestration stage 4) | Proposed (design only) |
+| [0026](0026-sessions-outlive-the-view.md) | Sessions outlive the view: detach, reattach and window close (orchestration stage 4) | Proposed (implemented; manual macOS checks pending) |
+| [0027](0027-approval-gate.md) | Central approval gate (orchestration stage 5) | Proposed (design only) |
