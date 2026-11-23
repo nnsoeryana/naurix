@@ -1,5 +1,5 @@
 # ADR 0030 — Reusable workflows and runs (orchestration stage 8)
-**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements stage 8 of ADR 0022 (§4.8) and the requirements ORCH-005 and WF-001, and builds the Task/Run model that ADR 0027 §6 moved here. It adds one approval class (`run_workflow`) and one scope (`run`), which the gate reserved a column for (`approvals.scope_ref`).
+**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 8 of ADR 0022 (§4.8) and the requirements ORCH-005 and WF-001, and builds the Task/Run model that ADR 0027 §6 moved here. It adds one approval class (`run_workflow`) and one scope (`run`), which the gate reserved a column for (`approvals.scope_ref`).
 
 ## Context
 Stages 1–7 give Naurix agent sessions that survive the view, one approval gate, an agent limit, opt-in worktrees and opt-in status signals. What is missing is the "reusable workflows" principle of ADR 0022: a saved set of agent runs and dependencies that can be started many times.
@@ -71,3 +71,25 @@ A **Workflows** view per workspace: the list, an editor (name, steps, an agent p
 1. **Approval: one reviewed approval for the whole run.** Steps then start as dependencies finish; the grants are tied to the workflow's fingerprint and end with the run.
 2. **A step is done when its process exits (0 = success, anything else = failure) or when the user presses Mark done / Skip.** No output heuristics and no signal-based completion.
 3. **A step is only a reference to an agent: no stored prompts, no automated input.**
+
+## Implementation log (2026-11-23)
+Implemented on branch `feat/workflows`: migration 6; `crates/core/src/workflow` (model and validation, store, engine); `ActionClass::RunWorkflow`, `Scope::Run`, `authorize_in_run`, `grant_run` and `end_run` in the gate; `Event::RunChanged`; `src-tauri/src/workflow.rs` (commands, the launcher, the engine start-up) with the launch code of `agent.rs` split into `resolve` and `build_launch` so a user launch and a workflow step share it; and the Workflows view with an editor, the run review, and run progress.
+
+Differences from, or additions to, the design above:
+- **Cancel also stops tracking running steps**: they become `cancelled`, not left `running`, and their sessions are left alone. The design only said pending steps become cancelled.
+- A **busy agent limit** is its own launch problem: the step stays `pending` and is retried when a session exits, instead of failing.
+- **Exits the lossy bus drops are caught up** (`reconcile`) whenever a run is read.
+- The editor only offers **earlier steps** as dependencies, so a cycle cannot even be drawn; Core still checks.
+- Run-scoped grants are matched on workspace as well as run id, and are preferred over a "once" grant, so a run never spends a once approval meant for something else.
+- No new dependency.
+
+**Evidence from the running app** (sandbox; custom agents that are `sh -c` commands): the Workflows view lists the saved workflow; a cycle is refused with its reason; Run shows the review with every exact command and the dependencies and starts nothing; after "Approve this run once" the steps went Running/Waiting → `build` succeeded (exit 0), `unit` succeeded, `lint` failed (exit 3) and `ship` shown as blocked, and the run ended `failed`; the three run grants were revoked at the end and the once approval was consumed. A second workflow with a step that never exits showed *Mark done* and *Open terminal*; Open terminal added one pane for the live session, Mark done started the next step, the run ended `succeeded`, and the first agent was **still running** afterwards. No grants remained at the end. In Core, 14 tests cover ordering, failed and skipped dependencies, the limit, once approval, drift after review (a changed program invalidates the approval and a step outside the review fails without asking), revoking mid-run, cancel, active-run locks, history after deleting a workflow, restart (`interrupted`), and that nothing an agent prints reaches the database. (The smoke run's WAL does contain the marker text because the smoke agent's own command line holds it; the Core test, where it is only output, is the proof.)
+
+**Not verified:**
+1. The Workflows view was driven by clicking its buttons from a script and read as text; nobody has looked at it. Layout and wording need a visual pass.
+2. No real agent CLI was run as a step, only `sh` commands. A step whose agent has status hooks enabled was not run.
+3. A real restart while a run is active was tested in Core (a second engine over the same database), not by quitting the app.
+4. Several runs at once in one workspace, the 24-step limit in the UI, and a run whose workspace folder disappears were not exercised in the app.
+5. Windows and Linux were not run.
+
+**Still pending the maintainer:** marking this ADR Accepted, after which the PRD records ORCH-005 and WF-001 as implemented (and the session/run scope text in APR-002), and `AGENTS.md` lists stage 8 as done.

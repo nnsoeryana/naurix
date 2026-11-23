@@ -7,6 +7,7 @@ import { sessionApi, terminalApi } from "../features/terminal/api";
 import { agentApi } from "../features/agents/api";
 import { approvalApi } from "../features/approvals/api";
 import { worktreeApi } from "../features/worktrees/api";
+import { workflowApi } from "../features/workflows/api";
 import { workspaceApi } from "../features/workspaces/api";
 import { mcpApi } from "../features/mcp/api";
 import { dumpDevTerminals, getDevTerminal } from "./devTerminals";
@@ -113,6 +114,77 @@ export async function runSmoke() {
         out.listAfter = (await worktreeApi.list(wsId)).length;
         out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
         await report({ stage: "worktree", out });
+        return;
+      }
+      if (visual === "workflow") {
+        // Workflows (ADR 0030) end to end through the real Workflows view. Agents are custom `sh -c` commands.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const slow = await mk("Slow ok", "sleep 2; exit 0");
+        const ok = await mk("Quick ok", "echo PLANTED-OUTPUT-MARKER; exit 0");
+        const bad = await mk("Quick fail", "exit 3");
+        const hang = await mk("Hang", "sleep 300");
+        await st().refreshAgents();
+        await workflowApi.save(w.id, null, "Build then check", [
+          { name: "build", agentId: slow.id, dependsOn: [] },
+          { name: "unit", agentId: ok.id, dependsOn: [0] },
+          { name: "lint", agentId: bad.id, dependsOn: [0] },
+          { name: "ship", agentId: ok.id, dependsOn: [1, 2] },
+        ]);
+        out.cycleRefused = await workflowApi.save(w.id, null, "cycle", [{ name: "a", agentId: ok.id, dependsOn: [] }, { name: "b", agentId: ok.id, dependsOn: [0] }].map((x, i) => (i === 0 ? { ...x, dependsOn: [1] } : x))).then(() => "saved", (e) => String(e));
+        st().setView("workflows");
+        await sleep(800);
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        out.listed = all("[data-workflow]").map((e) => e.textContent);
+        out.activeBefore = (await approvalApi.list()).active.length;
+        q("[data-workflow-run]")!.click();
+        await waitFor(() => !!q("[data-run-review]"));
+        out.review = q("[data-run-review] pre")?.textContent ?? null;
+        out.sessionsBeforeApproval = (await sessionApi.list()).length;
+        q("[data-run-approve]")!.click();
+        const seen: string[] = [];
+        await waitFor(() => {
+          const snap = all("[data-run-step]").map((e) => `${e.querySelector("[data-step-label]")?.textContent}`).join(" | ");
+          if (seen[seen.length - 1] !== snap) seen.push(snap);
+          return q("[data-run-state]")?.textContent === "failed" || q("[data-run-state]")?.textContent === "succeeded";
+        }, 30000);
+        out.progress = seen;
+        out.firstRunState = q("[data-run-state]")?.textContent ?? null;
+        out.grantsAfterRun = (await approvalApi.list()).active.length;
+        out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
+
+        // Second workflow: an interactive-style step that never exits, finished by the user.
+        const wf2 = await workflowApi.save(w.id, null, "Manual finish", [{ name: "agent", agentId: hang.id, dependsOn: [] }, { name: "after", agentId: ok.id, dependsOn: [0] }]);
+        await st().refreshAgents();
+        const start2 = await workflowApi.run(wf2.id);
+        if (start2.kind === "required") await approvalApi.decide(start2.request.id, { decision: "allow", scope: "once" });
+        const started2 = await workflowApi.run(wf2.id);
+        await sleep(1200);
+        st().bumpRuns();
+        await sleep(600);
+        const hangSid = started2.kind === "started" ? Object.values(started2.run.sessions)[0] : undefined;
+        out.hangSession = hangSid ?? null;
+        out.markDoneButtons = all("button").filter((b) => b.textContent === "Mark done").length;
+        out.openTerminalButtons = all("button").filter((b) => b.textContent === "Open terminal").length;
+        const panesBefore = Object.keys(st().paneKinds).length;
+        all("button").find((b) => b.textContent === "Open terminal")?.click();
+        await sleep(1500);
+        out.openedPane = Object.keys(st().paneKinds).length - panesBefore;
+        st().setView("workflows");
+        await sleep(800);
+        all("button").find((b) => b.textContent === "Mark done")?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "succeeded", 15000);
+        out.secondRunState = all("[data-run-state]")[0]?.textContent ?? null;
+        out.hangStillRunning = hangSid !== undefined ? (await sessionApi.list()).some((x) => x.id === hangSid && x.running) : null;
+        if (hangSid !== undefined) await sessionApi.close(hangSid);
+        out.grantsAtEnd = (await approvalApi.list()).active.length;
+        await report({ stage: "workflow", out });
         return;
       }
       if (visual === "status") {
