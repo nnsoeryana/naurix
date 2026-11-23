@@ -245,11 +245,20 @@ export async function runSmoke() {
         q("[data-run-approve]")!.click();
         const seen: string[] = [];
         await waitFor(() => {
-          const snap = all("[data-run-step]").map((e) => `${e.querySelector("[data-step-label]")?.textContent}`).join(" | ");
+          const snap = all("[data-graph-step]").map((e) => `${e.querySelector("[data-graph-label]")?.textContent}`).join(" | ");
           if (seen[seen.length - 1] !== snap) seen.push(snap);
           return q("[data-run-state]")?.textContent === "failed" || q("[data-run-state]")?.textContent === "succeeded";
         }, 30000);
         out.progress = seen;
+        out.graph = { nodes: all(".react-flow__node").length, edges: all(".react-flow__edge").length, positions: all(".react-flow__node").map((n) => n.style.transform) };
+        out.graphStates = all("[data-graph-step]").map((e) => e.getAttribute("data-graph-step"));
+        // The list stays available as the alternative view.
+        q("[data-run-mode='list']")!.click();
+        await sleep(500);
+        out.listStepsAfterToggle = all("[data-run-step]").length;
+        out.graphGoneInList = all(".react-flow__node").length;
+        q("[data-run-mode='graph']")!.click();
+        await sleep(800);
         out.firstRunState = q("[data-run-state]")?.textContent ?? null;
         out.grantsAfterRun = (await approvalApi.list()).active.length;
         out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);

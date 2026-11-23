@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../state/store";
 import { approvalApi, type ApprovalRequest } from "../approvals/api";
 import { workflowApi, type Run, type Workflow } from "./api";
 import { addStep, canMarkDone, canSkip, draftOf, emptyDraft, removeStep, stepLabel, toggleDependency, type Draft } from "./model";
+
+// The graph library is large, so it is fetched only when a run is shown as a graph (terminals never pay for it).
+const RunGraph = lazy(() => import("./RunGraph"));
 
 const outline = "rounded border border-line px-2 py-0.5 text-xs text-muted hover:bg-raised disabled:opacity-40";
 const input = "rounded border border-line bg-transparent px-2 py-1 text-sm";
@@ -19,6 +22,7 @@ export function WorkflowsView() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [review, setReview] = useState<{ workflow: Workflow; request: ApprovalRequest } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"graph" | "list">("graph");
   const reviewRef = useRef(review);
   reviewRef.current = review;
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? `${id} (not installed)`;
@@ -136,7 +140,14 @@ export function WorkflowsView() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold">Runs</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">Runs</h2>
+            <span className="ml-auto flex overflow-hidden rounded border border-line text-xs" role="group" aria-label="Show runs as">
+              {(["graph", "list"] as const).map((m) => (
+                <button key={m} className={`px-2 py-0.5 ${mode === m ? "bg-raised text-cloud" : "text-muted hover:bg-raised/60"}`} aria-pressed={mode === m} onClick={() => setMode(m)} data-run-mode={m}>{m === "graph" ? "Graph" : "List"}</button>
+              ))}
+            </span>
+          </div>
           {runs.length === 0 && <p className="text-sm text-faint">Nothing has run yet.</p>}
           {runs.map((r, i) => (
             <details key={r.id} open={r.state === "running" || i === 0} className="rounded-lg border border-line px-3 py-2" data-run={r.state}>
@@ -145,6 +156,14 @@ export function WorkflowsView() {
                 <span className={`text-xs ${r.state === "succeeded" ? "text-teal" : r.state === "running" ? "text-cloud" : "text-warning"}`} data-run-state>{r.state}</span>
                 <span className="ml-auto text-[11px] text-faint">{r.createdAt}</span>
               </summary>
+              {mode === "graph" && (
+                <div className="mt-2">
+                  <Suspense fallback={<p className="text-xs text-faint">Loading graph…</p>}>
+                    <RunGraph run={r} agentName={agentName} onOpen={(sid) => void openSession(sid)} onDone={(stepId) => act(workflowApi.markDone(r.id, stepId))} onSkip={(stepId) => act(workflowApi.skip(r.id, stepId))} />
+                  </Suspense>
+                </div>
+              )}
+              {mode === "list" && (
               <ul className="mt-2 space-y-1.5">
                 {r.steps.map((s) => {
                   const l = stepLabel(r, s);
@@ -162,6 +181,7 @@ export function WorkflowsView() {
                   );
                 })}
               </ul>
+              )}
               {r.state === "running" && (
                 <div className="mt-2 flex items-center gap-3">
                   <button className={outline} onClick={() => act(workflowApi.cancel(r.id))}>Cancel run</button>
