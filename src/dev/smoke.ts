@@ -4,6 +4,7 @@ import { computeGeometry, paneIds } from "../features/layout/layout";
 import { sessionRegistry } from "../features/terminal/registry";
 import { terminalApi } from "../features/terminal/api";
 import { agentApi } from "../features/agents/api";
+import { approvalApi } from "../features/approvals/api";
 import { workspaceApi } from "../features/workspaces/api";
 import { mcpApi } from "../features/mcp/api";
 import { dumpDevTerminals, getDevTerminal } from "./devTerminals";
@@ -60,6 +61,8 @@ export async function runSmoke() {
           sessionStorage.setItem("smokeSid", String(sid));
           await type(pane()!, "echo MARK_$((40+2))\r");
           const sawMarker = await waitFor(() => text().includes("MARK_42"));
+          await sleep(500); // let the prompt settle so the snapshot is what the user saw
+          sessionStorage.setItem("smokeLines", JSON.stringify(text().split("\n")));
           await report({ stage: "before-reload", sid, sawMarker });
           await sleep(300);
           location.reload();
@@ -67,12 +70,20 @@ export async function runSmoke() {
         }
         const pa = pane()!;
         const replayed = await waitFor(() => text().includes("MARK_42"));
+        await sleep(500); // replay arrives in chunks; let it finish before comparing
+        const replayedLines = text().split("\n");
+        const before = JSON.parse(sessionStorage.getItem("smokeLines") ?? "[]") as string[];
         const sidAfter = sessionRegistry.get(pa);
-        await type(pa, "echo ALIVE_$((50+5))\r");
-        const alive = await waitFor(() => text().includes("ALIVE_55"));
+        // A marker unique to this reload, so "the shell still answers" cannot be satisfied by replayed text.
         const reloads = Number(sessionStorage.getItem("smokeN") ?? "0") + 1;
         sessionStorage.setItem("smokeN", String(reloads));
-        await report({ stage: "after-reload", reloads, sidBefore: sessionStorage.getItem("smokeSid"), sidAfter, tabs: st().spaces[ws].tabs.length, replayed, alive, state: st().paneState[pa]?.kind, lines: text().split("\n") });
+        await type(pa, `echo ALIVE_$((50+${reloads}))\r`);
+        const alive = await waitFor(() => text().includes(`ALIVE_${50 + reloads}`));
+        sessionStorage.setItem("smokeLines", JSON.stringify(text().split("\n")));
+        const results = JSON.parse(sessionStorage.getItem("smokeResults") ?? "[]") as unknown[];
+        results.push({ reload: reloads, sameSession: String(sidAfter) === sessionStorage.getItem("smokeSid"), replayMatches: JSON.stringify(replayedLines) === JSON.stringify(before), alive });
+        sessionStorage.setItem("smokeResults", JSON.stringify(results));
+        await report({ stage: "after-reload", results, reloads, sidBefore: sessionStorage.getItem("smokeSid"), sidAfter, tabs: st().spaces[ws].tabs.length, replayed, replayMatchesWhatWasOnScreen: JSON.stringify(replayedLines) === JSON.stringify(before), before, replayedLines, alive, state: st().paneState[pa]?.kind, lines: text().split("\n") });
         if (reloads < 2) {
           await sleep(300);
           location.reload(); // a second reload must work just as well
@@ -570,11 +581,14 @@ export async function runSmoke() {
     await st().refreshAgents();
     const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
 
-    st().launchAgent(mock.id, false); // not reviewed: the backend must refuse
+    st().launchAgent(mock.id); // no approval yet: the backend must refuse and start nothing
     await sleep(2500);
     const unreviewed = { ...st().paneState[agentPanes()[0]] };
 
-    st().launchAgent(mock.id, true);
+    // Approve once through the real gate (the backend builds the request), then launch.
+    const auth = await agentApi.authorize(st().activeWorkspaceId!, mock.id);
+    if (auth.kind === "required") await approvalApi.decide(auth.request.id, { decision: "allow", scope: "once" });
+    st().launchAgent(mock.id);
     await sleep(2500);
     const running = agentPanes()[1];
     await type(running, "hello\r");
@@ -584,7 +598,7 @@ export async function runSmoke() {
     await sleep(2000);
     const afterClean = { state: { ...st().paneState[running] }, stillThere: agentPanes().includes(running) };
 
-    st().launchAgent("codex", true); // not installed on this machine
+    st().launchAgent("codex"); // not installed on this machine
     await sleep(2500);
     const codexPane = agentPanes()[2];
     const notInstalled = { ...st().paneState[codexPane] };
