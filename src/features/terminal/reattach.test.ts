@@ -11,10 +11,10 @@ describe("planReattach", () => {
     expect(plan.map((p) => p.workspaceId)).toEqual(["w1", "w1", "w2"]);
   });
 
-  it("restores agents as agent panes that were already reviewed, shells as shell panes", () => {
+  it("restores agents as agent panes and shells as shell panes", () => {
     const [shell, agent] = planReattach([s({ id: 1 }), s({ id: 2, kind: "agent", title: "Claude Code", adapterId: "claude-code" })], new Set(["w1"]));
     expect(shell.kind).toEqual({ type: "shell", sessionId: 1 });
-    expect(agent.kind).toEqual({ type: "agent", agentId: "claude-code", name: "Claude Code", reviewed: true, sessionId: 2 });
+    expect(agent.kind).toEqual({ type: "agent", agentId: "claude-code", name: "Claude Code", sessionId: 2 });
   });
 
   it("skips sessions of workspaces that are not listed and keeps exited sessions so their output can be read", () => {

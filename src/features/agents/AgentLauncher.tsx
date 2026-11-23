@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../../state/store";
+import { approvalApi, scopeLabel, type ApprovalRequest, type ApprovalScope } from "../approvals/api";
 import { agentApi, type AgentInfo, type CustomAgentInput } from "./api";
 import { Capabilities } from "./Capabilities";
 
-type Mode = { kind: "list" } | { kind: "review"; id: string } | { kind: "edit"; draft: Draft };
+/** `request` is set when the backend asked for approval: the review then shows ITS text, not anything the UI built. */
+type Mode = { kind: "list" } | { kind: "review"; id: string; request?: ApprovalRequest } | { kind: "edit"; draft: Draft };
 type Draft = { id?: string; name: string; executable: string; args: string; env: string };
 
 const field = "w-full rounded border border-line bg-midnight px-2 py-1 text-sm outline-none focus:border-purple";
@@ -33,9 +35,22 @@ function Launcher() {
     }
   };
 
-  const launch = (a: AgentInfo, reviewed: boolean) => {
+  const launch = (a: AgentInfo) => {
     close();
-    useStore.getState().launchAgent(a.id, reviewed);
+    useStore.getState().launchAgent(a.id);
+  };
+
+  /** Ask the backend whether this agent may start. If it needs approval, show the review it built. */
+  const start = async (a: AgentInfo) => {
+    if (!workspace) return;
+    try {
+      const r = await agentApi.authorize(workspace.id, a.id);
+      setError(null);
+      if (r.kind === "allowed") launch(a);
+      else setMode({ kind: "review", id: a.id, request: r.request });
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
@@ -65,11 +80,8 @@ function Launcher() {
                     </>
                   )}
                   {a.resolvedPath ? (
-                    <button
-                      className={`${btn} btn-primary`}
-                      // Presets already reviewed for this exact executable launch directly; everything else is reviewed first.
-                      onClick={() => (a.kind === "preset" && a.approved ? launch(a, false) : setMode({ kind: "review", id: a.id }))}
-                    >
+                    // The backend decides: an agent with a matching approval starts, anything else is reviewed first.
+                    <button className={`${btn} btn-primary`} onClick={() => void start(a)}>
                       Launch
                     </button>
                   ) : (
@@ -85,16 +97,17 @@ function Launcher() {
             </div>
           </>
         )}
-        {mode.kind === "review" && <Review agent={agents.find((a) => a.id === mode.id)} rootPath={workspace?.rootPath ?? ""} back={() => setMode({ kind: "list" })} launch={launch} run={run} error={error} />}
+        {mode.kind === "review" && <Review agent={agents.find((a) => a.id === mode.id)} request={mode.request} rootPath={workspace?.rootPath ?? ""} back={() => setMode({ kind: "list" })} start={start} launch={launch} run={run} error={error} />}
         {mode.kind === "edit" && <Edit draft={mode.draft} back={() => setMode({ kind: "list" })} run={run} error={error} />}
       </div>
     </div>
   );
 }
 
-function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentInfo; rootPath: string; back: () => void; launch: (a: AgentInfo, reviewed: boolean) => void; run: (p: Promise<AgentInfo[]>, then?: () => void) => Promise<void>; error: string | null }) {
+function Review({ agent, request, rootPath, back, start, launch, run, error }: { agent?: AgentInfo; request?: ApprovalRequest; rootPath: string; back: () => void; start: (a: AgentInfo) => Promise<void>; launch: (a: AgentInfo) => void; run: (p: Promise<AgentInfo[]>, then?: () => void) => Promise<void>; error: string | null }) {
   const [path, setPath] = useState(agent?.pathOverride ?? "");
   const [version, setVersion] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const id = agent?.id;
   const approved = agent?.approved;
   useEffect(() => {
@@ -102,19 +115,33 @@ function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentIn
     if (id && approved) void agentApi.version(id).then(setVersion).catch(() => setVersion(null));
   }, [id, approved]);
   if (!agent) return null;
+
+  /** Record the user's decision, then launch. The decision names only the request and a scope. */
+  const allow = async (req: ApprovalRequest, scope: ApprovalScope) => {
+    try {
+      await approvalApi.decide(req.id, { decision: "allow", scope });
+      launch(agent);
+    } catch (e) {
+      setProblem(String(e));
+    }
+  };
+  const deny = async (req: ApprovalRequest) => {
+    await approvalApi.decide(req.id, { decision: "deny" }).catch(() => {});
+    back();
+  };
+
   return (
     <>
-      <h2 className="mb-1 text-sm font-semibold">{agent.resolvedPath ? `Review: ${agent.name}` : `Set up ${agent.name}`}</h2>
+      <h2 className="mb-1 text-sm font-semibold">{!agent.resolvedPath ? `Set up ${agent.name}` : request ? `Allow ${agent.name} to start?` : `Review: ${agent.name}`}</h2>
       {agent.adapter?.notice && <p className="mb-3 rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning">{agent.adapter.notice}</p>}
       {version && <p className="mb-2 text-xs text-faint">Installed version: <span className="font-mono text-muted">{version}</span></p>}
       <Capabilities agent={agent} />
       {agent.resolvedPath ? (
         <>
-          <p className="mb-2 text-xs text-muted">This will run the following in your workspace folder. Nothing else is executed.</p>
-          <pre className="mb-2 overflow-auto rounded bg-midnight p-2 text-xs text-cloud">{agent.command}</pre>
+          <p className="mb-2 text-xs text-muted">{request ? "Naurix will run exactly the following in your workspace folder. Nothing else is executed." : "This is what would run in your workspace folder."}</p>
+          <pre className="mb-2 overflow-auto rounded bg-midnight p-2 text-xs text-cloud" data-approval-display>{request ? request.display : agent.command}</pre>
           <dl className="mb-3 space-y-1 text-xs text-muted">
             <div><dt className="inline text-faint">Working directory: </dt><dd className="inline break-all">{rootPath}</dd></div>
-            {agent.env.length > 0 && <div><dt className="inline text-faint">Extra environment: </dt><dd className="inline">{agent.env.map((e) => `${e.name}=${e.value}`).join(", ")}</dd></div>}
           </dl>
         </>
       ) : (
@@ -126,11 +153,25 @@ function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentIn
         <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void agentApi.pickExecutable().then((p) => p && setPath(p))}>Browse…</button>
         <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void run(agentApi.setPath(agent.id, path.trim() || null))}>Save</button>
       </div>
-      {error && <p className="mb-2 text-xs text-danger">{error}</p>}
-      <div className="flex justify-between">
-        <button className={`${btn} bg-raised hover:bg-line`} onClick={back}>Back</button>
-        <button disabled={!agent.resolvedPath} className={`${btn} btn-primary disabled:opacity-40`} onClick={() => launch(agent, true)}>Launch</button>
-      </div>
+      {(error || problem) && <p className="mb-2 text-xs text-danger">{problem ?? error}</p>}
+      {request ? (
+        <>
+          <p className="mb-2 text-xs text-faint">A choice other than “once” is remembered for this exact program and arguments. If either changes you are asked again. You can withdraw approvals in Settings, Security.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void deny(request)}>Don’t allow</button>
+            <div className="flex flex-wrap gap-2">
+              {request.allowedScopes.map((sc, i) => (
+                <button key={sc} className={`${btn} ${i === 0 ? "btn-primary" : "bg-raised hover:bg-line"}`} onClick={() => void allow(request, sc)}>{scopeLabel(sc)}</button>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex justify-between">
+          <button className={`${btn} bg-raised hover:bg-line`} onClick={back}>Back</button>
+          <button disabled={!agent.resolvedPath} className={`${btn} btn-primary disabled:opacity-40`} onClick={() => void start(agent)}>Launch</button>
+        </div>
+      )}
     </>
   );
 }

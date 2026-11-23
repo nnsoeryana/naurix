@@ -69,7 +69,7 @@ function Pane({ paneId, ctx }: { paneId: string; ctx: Ctx }) {
         title={kind?.type === "agent" ? kind.name : ctx.tab.title}
         visible={ctx.visible}
         focused={isActive && ctx.visible}
-        agent={kind?.type === "agent" ? { id: kind.agentId, reviewed: kind.reviewed } : undefined}
+        agent={kind?.type === "agent" ? { id: kind.agentId } : undefined}
         atRepoRoot={kind?.type === "shell" ? kind.atRepoRoot : undefined}
         attachTo={kind?.sessionId}
         onState={(s) => setPaneState(paneId, s)}

@@ -8,7 +8,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { AckBatcher } from "./ackBatcher";
 import { useStore } from "../../state/store";
-import { agentApi } from "../agents/api";
+import { agentApi, launchErrorMessage } from "../agents/api";
 import { fontStack } from "./theme";
 import { terminalTheme } from "../../themes/apply";
 import { sessionApi, terminalApi, type ExitPayload } from "./api";
@@ -37,8 +37,8 @@ type Props = {
   visible: boolean;
   /** The pane that should receive keyboard focus. */
   focused: boolean;
-  /** When set, start this agent instead of a shell. `reviewed`: the user confirmed the command. */
-  agent?: { id: string; reviewed: boolean };
+  /** When set, start this agent instead of a shell. The backend only starts it if an approval exists. */
+  agent?: { id: string };
   /** Open a plain shell at the repository root instead of the workspace folder (decided by the backend). */
   atRepoRoot?: boolean;
   /** Attach to a session Core kept alive (after a reload) instead of starting a new one (ADR 0026). */
@@ -53,6 +53,14 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
   const handle = useRef<{ fit: () => void; focus: () => void } | null>(null);
   const initial = useRef({ workspaceId, paneId, title, agent, atRepoRoot: !!atRepoRoot, attachTo });
   const termRef = useRef<Terminal | null>(null);
+  /**
+   * The session start (spawn, launch or attach) and its channels, created once per component instance.
+   * React StrictMode runs this effect twice in development; starting twice would launch an agent twice
+   * and spend a one-time approval on the first, so the second run reuses the first's start.
+   */
+  const shared = useRef<{ output: Channel<ArrayBuffer>; exit: Channel<ExitPayload>; start: Promise<number>; token: number } | null>(null);
+  /** False while the component is really gone (and, momentarily, between StrictMode's two runs). */
+  const mounted = useRef(false);
   const t = useStore((s) => s.settings.terminal);
 
   // Follow the application theme. Assigning `options.theme` repaints in place: the Terminal object, its
@@ -109,6 +117,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     terminalHandles.set(initial.current.paneId, { hasSelection: () => term.hasSelection(), getSelection: () => term.getSelection(), paste: (t) => term.paste(t), focus: () => term.focus() });
     if (import.meta.env.DEV) registerDevTerminal(initial.current.paneId, term);
 
+    mounted.current = true;
     let id: number | null = null;
     let disposed = false;
     let pendingInput = "";
@@ -120,13 +129,38 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       return true;
     });
 
-    const output = new Channel<ArrayBuffer>();
+    const a = initial.current.agent;
+    const existing = initial.current.attachTo;
+    let sh = shared.current;
+    if (!sh) {
+      const output = new Channel<ArrayBuffer>();
+      const exit = new Channel<ExitPayload>();
+      if (existing !== undefined) sessionRegistry.set(initial.current.paneId, existing);
+      const fresh = { output, exit, token: 0, start: null as unknown as Promise<number> };
+      fresh.start =
+        existing !== undefined
+          ? sessionApi.attach(existing, term.rows, term.cols, output, exit).then((t) => ((fresh.token = t), existing))
+          : a
+            ? agentApi.launch(initial.current.workspaceId, a.id, term.rows, term.cols, output, exit)
+            : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit);
+      // Decided once, when the start finishes: if the pane really went away meanwhile, nobody owns the
+      // session. One we started is stopped; one we attached to keeps running and is only released.
+      fresh.start
+        .then((sid) => {
+          if (mounted.current) return;
+          if (existing !== undefined) sessionApi.detach(sid, fresh.token).catch(() => {});
+          else sessionApi.close(sid).catch(() => {});
+        })
+        .catch(() => {});
+      sh = shared.current = fresh;
+    }
+    const { output, exit } = sh;
+    // The channels outlive a StrictMode re-run, so each run points them at its own terminal.
     output.onmessage = (buf) => {
       const bytes = new Uint8Array(buf);
       noteOutput(initial.current.paneId);
       term.write(bytes, () => acks.add(bytes.length));
     };
-    const exit = new Channel<ExitPayload>();
     exit.onmessage = (p) => {
       exited = true;
       endTurn(initial.current.paneId);
@@ -134,25 +168,9 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     };
 
     onStateRef.current({ kind: "starting" });
-    const a = initial.current.agent;
-    const existing = initial.current.attachTo;
-    /** Generation of our output consumer. The consumer of a session we start is generation 0. */
-    let token = 0;
-    if (existing !== undefined) sessionRegistry.set(initial.current.paneId, existing);
-    (existing !== undefined
-      ? sessionApi.attach(existing, term.rows, term.cols, output, exit).then((t) => ((token = t), existing))
-      : a
-        ? agentApi.launch(initial.current.workspaceId, a.id, a.reviewed, term.rows, term.cols, output, exit)
-        : terminalApi.spawn(initial.current.workspaceId, initial.current.title, initial.current.atRepoRoot, term.rows, term.cols, output, exit)
-    )
+    sh.start
       .then((sid) => {
-        if (disposed) {
-          // Nobody owns this view any more. A session we just started goes with it; one we attached to
-          // keeps running and is only released.
-          if (existing !== undefined) sessionApi.detach(sid, token).catch(() => {});
-          else sessionApi.close(sid).catch(() => {});
-          return;
-        }
+        if (disposed) return; // a later run (StrictMode) or the creation-time handler above owns the outcome
         id = sid;
         if (a && existing === undefined) startTurn(initial.current.paneId);
         sessionRegistry.set(initial.current.paneId, sid);
@@ -176,7 +194,9 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
           }, 150);
         }
       })
-      .catch((e) => onStateRef.current({ kind: "failed", message: String(e) }));
+      .catch((e) => {
+        if (!disposed) onStateRef.current({ kind: "failed", message: launchErrorMessage(e) });
+      });
 
     // xterm sends a plain CR for Shift+Enter, which submits. Send ESC+CR instead so
     // agent CLIs insert a newline while the user is still composing.
@@ -225,6 +245,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     ro.observe(el);
 
     return () => {
+      mounted.current = false;
       disposed = true;
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -234,7 +255,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
       output.onmessage = () => {};
       exit.onmessage = () => {};
       // Unmounting only releases the session. Ending it is the user's explicit close (see the store).
-      if (id !== null) sessionApi.detach(id, token).catch(() => {});
+      if (id !== null) sessionApi.detach(id, shared.current?.token ?? 0).catch(() => {});
       endTurn(initial.current.paneId);
       handle.current = null;
       terminalHandles.delete(initial.current.paneId);

@@ -1,3 +1,4 @@
+import { ApprovalsPanel } from "../approvals/ApprovalsPanel";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useStore } from "../../state/store";
 import { agentApi, type AgentInfo } from "../agents/api";
@@ -175,6 +176,7 @@ export function SettingsView() {
             <Row label="MCP approvals" hint="Withdrawing approvals makes every server inert again until you review it. Nothing is deleted.">
               <div className="flex items-center gap-3"><span className="text-xs text-muted">{sec.mcpApproved} of {sec.mcpServers} approved</span><button className={outline} disabled={sec.mcpApproved === 0} onClick={() => useStore.getState().setDialog({ kind: "confirm", title: "Withdraw all MCP approvals?", message: "Servers stay defined, but none may run or be written to an agent until you approve it again.", confirmLabel: "Withdraw", danger: true, onConfirm: () => void settingsApi.revokeMcpApprovals().then(loadSec).catch(fail) })}>Withdraw all…</button></div>
             </Row>
+            <Row label="Agent launch approvals" hint="What you allowed agents to start. An approval only matches the exact program and arguments you reviewed; change either and you are asked again. Revoke to be asked next time."><ApprovalsPanel /></Row>
             <Row label="Trusted Git repositories" hint="Repositories whose own configuration defines commands (filters) that Git would run. Revoke to stop running Git there.">
               {sec.trustedRepos.length === 0 ? <span className="text-xs text-faint">None</span> : (
                 <ul className="space-y-1">{sec.trustedRepos.map((r) => <li key={r.key} className="flex items-center gap-3"><span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={r.path}>{r.path}</span><button className={outline} onClick={() => void settingsApi.untrustRepo(r.key).then(loadSec).then(() => useStore.getState().refreshGit()).catch(fail)}>Revoke</button></li>)}</ul>
