@@ -31,5 +31,5 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0024](0024-domain-event-bus.md) | Domain event bus in Core (orchestration stage 2) | Proposed |
 | [0025](0025-agent-adapter-trait.md) | `AgentAdapter` trait for per-agent behaviour (orchestration stage 3) | Proposed |
 | [0026](0026-sessions-outlive-the-view.md) | Sessions outlive the view: detach, reattach and window close (orchestration stage 4) | Proposed (implemented; manual macOS checks pending) |
-| [0027](0027-approval-gate.md) | Central approval gate (orchestration stage 5) | Proposed (design only) |
+| [0027](0027-approval-gate.md) | Central approval gate (orchestration stage 5) | Proposed (implemented; visual and real-agent checks pending) |
 | [0028](0028-worktree-isolation.md) | Opt-in Git worktree isolation for agents (orchestration stage 6) | Proposed (design only) |
