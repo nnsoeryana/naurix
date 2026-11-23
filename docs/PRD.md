@@ -171,7 +171,7 @@ Settings sections: General, Terminal, AI Agents, MCP Integrations, Agent Skills,
 
 ### 5.9 Orchestration workspace (post-MVP, ADR 0022)
 
-Delivered in the stages listed in ADR 0022, each leaving the app runnable. Implemented so far (stages 1–6, ADR 0023–0028): SES-001–004, ORCH-001–004, ORCH-006, APR-001–003 and GIT-006; still to do: ORCH-005, WF-001 and MEM-001–008. Visual and real-agent checks are listed as not verified in each ADR's implementation log. None of it may be required to use the terminal.
+Delivered in the stages listed in ADR 0022, each leaving the app runnable. Implemented so far (stages 1–7, ADR 0023–0029): SES-001–004, ORCH-001–004, ORCH-006, ORCH-007 (Claude Code only), APR-001–003 and GIT-006; still to do: ORCH-005, WF-001 and MEM-001–008. Visual and real-agent checks are listed as not verified in each ADR's implementation log. None of it may be required to use the terminal.
 
 | ID | Priority | Requirement | Acceptance criteria |
 |---|---|---|---|

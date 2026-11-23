@@ -73,3 +73,22 @@ An adapter that has a **Verified** `StatusSignals` capability says how its agent
 
 ## Still open
 - Whether a desktop notification on "Waiting for approval" is wanted in a later stage; it is not part of this one.
+
+## Implementation log (2026-11-23)
+Implemented on branch `feat/status-signals`: `crates/core/src/signals.rs` (vocabulary, hook settings, spool create/follow/purge, binding), `AgentAdapter::status_args` (Claude Code only), `SessionManager::watch_status` with a `SessionStatus` event and `SessionInfo.status`, the `agents.statusSignals` setting (off by default, validated against adapters that can report), the launch changes in `src-tauri/src/agent.rs`, and the UI (sidebar label, Settings toggle, event listener, reattach).
+
+Differences from, or additions to, the design above:
+- **The interactive run completed the spike.** With `--permission-mode default` in the real TUI (Claude Code 2.1.329): `UserPromptSubmit` and `PostToolUse` fired (working), `PermissionRequest` fired (awaiting approval), and after the approval was answered the next signal was `PostToolUse` (working) and then `Stop` (turn done). `Notification` with matcher `idle_prompt` fired about a minute after a turn (idle). So **`PostToolUse` is the clearing event** for the approved path; the detail text still says the label is the agent's last report, not a live check.
+- **A session in an auto-approving permission mode asks nothing**, so `PermissionRequest` never fires (observed with this account's default; it fired only after `--permission-mode default`). The badge then simply never says "waiting for approval", which is correct.
+- **Status is tied to the reviewed launch.** The placeholder keeps the fingerprint stable across sessions; turning the setting on or off asks for approval again (tested with the real fingerprint function).
+- The agent list's "approved" mark is computed without the hooks, so it can show approved for an agent whose next launch asks again after the setting was turned on.
+- **Unix only for now**: on Windows `status_args` returns none and the setting is refused (the hook is a shell `printf`).
+- The spool is polled every 250 ms by one thread per watched session; no new dependency.
+
+**Evidence from the running app** (sandbox; `claude-code` pointed at `scripts/mock-status-agent`, which runs the hooks it is given the way Claude Code does, feeding a "secret" prompt on each hook's stdin): with the setting off the agent starts without `--settings` and shows plain "Running"; turning it on asks for approval again and the review shows the hooks with the placeholder, not a per-session path; the sidebar then showed Working, Waiting for approval, Working, Turn finished in order, with the report time in its detail; the backend list kept the last status and dropped it when the session closed; the secret prompt text appears nowhere in the database; the signals folder is empty after the session closed. Core tests cover the word filter, split and oversize lines, owner-only files, that no hook command reads its input, binding and unsafe paths, the fingerprint, the status events and cleanup after exit.
+
+**Not verified:**
+1. A **refused** approval (what the badge shows after "No"), hook failure or timeout, and the per-tool-call cost of the hooks (not measured).
+2. The real Claude Code was never started **by Naurix** with the hooks: the app run used the mock; the real CLI was driven separately, with the same hook commands, in a pseudo-terminal.
+3. The badge and the Settings toggle were not looked at by a person; the sidebar text was read from the page.
+4. Windows and Linux. Codex, OpenCode, Gemini CLI and Antigravity CLI have no verified signal and show process state only.

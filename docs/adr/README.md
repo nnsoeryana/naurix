@@ -33,4 +33,4 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0026](0026-sessions-outlive-the-view.md) | Sessions outlive the view: detach, reattach and window close (orchestration stage 4) | Accepted (implemented; manual macOS checks pending) |
 | [0027](0027-approval-gate.md) | Central approval gate (orchestration stage 5) | Accepted (implemented; visual and real-agent checks pending) |
 | [0028](0028-worktree-isolation.md) | Opt-in Git worktree isolation for agents (orchestration stage 6) | Accepted (implemented; visual and real-agent checks pending) |
-| [0029](0029-status-signals.md) | Verified status signals per agent, Claude Code first (orchestration stage 7) | Accepted (spike done; implementation pending) |
+| [0029](0029-status-signals.md) | Verified status signals per agent, Claude Code first (orchestration stage 7) | Accepted (implemented for Claude Code; interactive refusal path and other platforms unverified) |
