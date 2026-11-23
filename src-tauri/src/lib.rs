@@ -7,6 +7,7 @@ mod events;
 mod git;
 mod lifecycle;
 mod mcp;
+mod memory;
 mod settings;
 mod skills;
 mod terminal;
@@ -183,6 +184,13 @@ pub fn run() {
             workspace::workspace_open,
             workspace::workspace_remove,
             workspace::session_recent,
+            memory::memory_status,
+            memory::memory_set_enabled,
+            memory::memory_list,
+            memory::memory_save,
+            memory::memory_delete,
+            memory::memory_delete_all,
+            memory::memory_export,
             workflow::workflow_list,
             workflow::workflow_save,
             workflow::workflow_delete,
