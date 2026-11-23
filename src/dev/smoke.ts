@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useStore, activeSpace } from "../state/store";
 import { computeGeometry, paneIds } from "../features/layout/layout";
 import { sessionRegistry } from "../features/terminal/registry";
-import { terminalApi } from "../features/terminal/api";
+import { sessionApi, terminalApi } from "../features/terminal/api";
 import { agentApi } from "../features/agents/api";
 import { approvalApi } from "../features/approvals/api";
 import { workspaceApi } from "../features/workspaces/api";
@@ -40,6 +40,43 @@ export async function runSmoke() {
       const w = await workspaceApi.create(cfg.workspace!);
       await st().init();
       st().selectWorkspace(w.id);
+      if (visual === "limit") {
+        // The agent limit (ADR 0027): one slot. Agent B is approved ONCE; while A holds the slot B must be
+        // refused WITHOUT spending that approval, and must start afterwards using the same approval.
+        await st().updateSettings((x) => ({ ...x, agents: { maxConcurrent: 1 } }));
+        const mk = async (name: string, args: string[]) => (await agentApi.saveCustom({ name, executable: `${cfg.workspace}/mock-agent`, args, env: [] })).find((a) => a.name === name)!;
+        const A = await mk("Agent A", ["--a"]);
+        const B = await mk("Agent B", ["--b"]);
+        await st().refreshAgents();
+        const approve = async (id: string, scope: "once" | "workspace") => {
+          const r = await agentApi.authorize(w.id, id);
+          if (r.kind === "required") await approvalApi.decide(r.request.id, { decision: "allow", scope });
+        };
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const grants = async () => (await approvalApi.list()).active.map((g) => `${g.scope}:${g.summary.split(" at ")[0]}`);
+        await approve(A.id, "workspace");
+        await approve(B.id, "once");
+        st().launchAgent(A.id);
+        await sleep(2500);
+        const [pa] = agentPanes();
+        st().launchAgent(B.id);
+        await sleep(2500);
+        const pb = agentPanes()[1];
+        const refused = { ...st().paneState[pb] };
+        const grantsAfterRefusal = await grants(); // B's once grant must still be there
+        st().newTab(); // a plain terminal is never limited
+        await sleep(2000);
+        const sp = activeSpace(st());
+        const terminal = { ...st().paneState[sp!.tabs.find((t) => t.id === sp!.activeTabId)!.activePaneId] };
+        await sessionApi.close(sessionRegistry.get(pa)!); // free the slot
+        await sleep(1500);
+        st().restartPane(pb); // Launch again, as the user would
+        await sleep(2500);
+        const started = { ...st().paneState[pb] };
+        const history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.summary.split(" at ")[0]}`);
+        await report({ stage: "limit", refused, grantsAfterRefusal, terminal, started, history, grantsNow: await grants() });
+        return;
+      }
       if (visual === "reload") {
         // Sessions outlive a page reload (ADR 0026). Phase 1 starts a shell, prints a marker and reloads the
         // page. Phase 2 (the reloaded page) must find the SAME session, see the marker replayed, and still be able to use it.

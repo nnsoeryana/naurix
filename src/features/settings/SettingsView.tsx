@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useStore } from "../../state/store";
 import { agentApi, type AgentInfo } from "../agents/api";
 import { AppearanceSettings } from "../appearance/AppearanceSettings";
-import { FONT_MAX, FONT_MIN, SCROLLBACK_MAX, SCROLLBACK_MIN, SCROLLBACK_PRESETS, settingsApi, type PerfSnapshot, type SecurityInfo, type Settings } from "./api";
+import { AGENTS_MAX, AGENTS_MIN, FONT_MAX, FONT_MIN, SCROLLBACK_MAX, SCROLLBACK_MIN, SCROLLBACK_PRESETS, settingsApi, type PerfSnapshot, type SecurityInfo, type Settings } from "./api";
 
 const SECTIONS = ["General", "Appearance", "Terminal", "AI Agents", "MCP Integrations", "Agent Skills", "Performance", "Security"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -46,6 +46,7 @@ export function SettingsView() {
   const update = useStore((s) => s.updateSettings);
   const terminal = (patch: Partial<Settings["terminal"]>) => void update((s) => ({ ...s, terminal: { ...s.terminal, ...patch } }));
   const general = (patch: Partial<Settings["general"]>) => void update((s) => ({ ...s, general: { ...s.general, ...patch } }));
+  const agentsCfg = (patch: Partial<Settings["agents"]>) => void update((s) => ({ ...s, agents: { ...s.agents, ...patch } }));
   const setView = useStore((s) => s.setView);
   const setNotice = useStore((s) => s.setNotice);
   const fail = useCallback((e: unknown) => setNotice(String(e)), [setNotice]);
@@ -119,6 +120,9 @@ export function SettingsView() {
 
         {section === "AI Agents" && (
           <>
+            <Row label="Agents running at once" hint={`${AGENTS_MIN}–${AGENTS_MAX}. Starting another while this many run fails and starts nothing. Plain terminals are never limited. Lowering it does not stop agents that are already running.`}>
+              <Draft aria-label="Agents running at once" type="number" min={AGENTS_MIN} max={AGENTS_MAX} className="w-24" value={String(settings.agents.maxConcurrent)} onCommit={(v) => agentsCfg({ maxConcurrent: Number(v) })} />
+            </Row>
             <p className="py-2 text-sm text-muted">Where each agent&apos;s program is found. Naurix never installs agents. Changing the executable asks you to review the command again.</p>
             {agents.map((a) => (
               <Row key={a.id} label={a.name} hint={a.kind === "custom" ? "Custom agent" : undefined}>
