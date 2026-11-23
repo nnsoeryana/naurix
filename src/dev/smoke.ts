@@ -211,6 +211,90 @@ export async function runSmoke() {
         await report({ stage: "memory", out });
         return;
       }
+      if (visual === "workflow-ui") {
+        // The Workflows editor driven the way a person would: new workflow, steps, dependencies, save, run, approve.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const agents = { build: await mk("Demo build", "sleep 3; echo building; exit 0"), test: await mk("Demo test", "sleep 2; exit 0"), lint: await mk("Demo lint", "exit 3"), ship: await mk("Demo ship", "exit 0") };
+        await st().refreshAgents();
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        const setValue = (el: HTMLElement, v: string) => {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, v);
+          el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+        };
+        const click = (label: string) => all("button").find((b) => b.textContent === label)?.click();
+        st().setView("workflows");
+        await sleep(800);
+        click("New workflow");
+        await waitFor(() => !!q("[data-workflow-editor]"));
+        setValue(q("[aria-label='Workflow name']")!, "Build then check");
+        for (let i = 0; i < 3; i++) {
+          click("Add step");
+          await sleep(200);
+        }
+        out.stepEditors = all("[data-step-editor]").length;
+        const plan: [string, string, number[]][] = [["build", agents.build.id, []], ["test", agents.test.id, [0]], ["lint", agents.lint.id, [0]], ["ship", agents.ship.id, [1, 2]]];
+        for (let i = 0; i < plan.length; i++) {
+          setValue(q(`[aria-label='Step ${i + 1} name']`)!, plan[i][0]);
+          setValue(q(`[aria-label='Step ${i + 1} agent']`)!, plan[i][1]);
+          await sleep(150);
+          for (const dep of plan[i][2]) {
+            const boxes = all("[data-step-editor]")[i].querySelectorAll("input[type=checkbox]");
+            (boxes[dep] as HTMLInputElement).click();
+            await sleep(120);
+          }
+        }
+        out.editorTexts = all("[data-step-editor]").map((e) => e.textContent?.slice(0, 80));
+        click("Save");
+        await sleep(1200);
+        out.errorAfterSave = q("[role=alert]")?.textContent ?? null;
+        out.listed = all("[data-workflow]").map((e) => e.textContent);
+        out.runButtonDisabled = (q("[data-workflow-run]") as HTMLButtonElement | null)?.disabled ?? null;
+        q("[data-workflow-run]")?.click();
+        await waitFor(() => !!q("[data-run-review]"), 8000);
+        out.review = q("[data-run-review] pre")?.textContent?.slice(0, 500) ?? null;
+        out.errorAtRun = q("[role=alert]")?.textContent ?? null;
+        q("[data-run-approve]")?.click();
+        const seen: string[] = [];
+        await waitFor(() => {
+          const snap = all("[data-graph-step]").map((e) => `${e.querySelector("[data-graph-label]")?.textContent}`).join(" | ");
+          if (seen[seen.length - 1] !== snap) seen.push(snap);
+          return ["failed", "succeeded"].includes(q("[data-run-state]")?.textContent ?? "");
+        }, 30000);
+        out.progress = seen;
+        out.finalState = q("[data-run-state]")?.textContent ?? null;
+        out.graph = { nodes: all(".react-flow__node").length, edges: all(".react-flow__edge").length };
+        out.errorAtEnd = q("[role=alert]")?.textContent ?? null;
+        // A second run: the first one is now collapsed. Opening it must still show its graph inside the canvas.
+        q("[data-workflow-run]")?.click();
+        await waitFor(() => !!q("[data-run-review]"), 8000);
+        q("[data-run-approve]")?.click();
+        await waitFor(() => all("[data-run-state]").length === 2 && all("[data-run-state]").every((e) => e.textContent !== "running"), 30000);
+        const runs = all("details[data-run]");
+        out.detailsOpen = runs.map((d) => (d as HTMLDetailsElement).open);
+        const older = runs[runs.length - 1];
+        out.olderNodesBeforeOpen = older.querySelectorAll(".react-flow__node").length;
+        out.graphsMountedWhileOneRunCollapsed = all(".react-flow__renderer, [data-run-graph]").length;
+        (older.querySelector("summary") as HTMLElement).click();
+        await sleep(1500);
+        const box = (e: Element) => e.getBoundingClientRect();
+        const canvas = older.querySelector("[data-run-graph]");
+        const cb = canvas ? box(canvas) : null;
+        const inside = all("details[data-run]").length ? [...older.querySelectorAll(".react-flow__node")].filter((n) => {
+          const b = box(n);
+          return !!cb && b.width > 0 && b.left >= cb.left - 1 && b.right <= cb.right + 1 && b.top >= cb.top - 1 && b.bottom <= cb.bottom + 1;
+        }).length : 0;
+        out.olderGraph = { canvas: cb ? [Math.round(cb.width), Math.round(cb.height)] : null, nodes: older.querySelectorAll(".react-flow__node").length, nodesFullyInsideCanvas: inside, viewport: (older.querySelector(".react-flow__viewport") as HTMLElement | null)?.style.transform ?? null };
+        await report({ stage: "workflow-ui", out });
+        return;
+      }
       if (visual === "workflow") {
         // Workflows (ADR 0030) end to end through the real Workflows view. Agents are custom `sh -c` commands.
         const out: Record<string, unknown> = {};

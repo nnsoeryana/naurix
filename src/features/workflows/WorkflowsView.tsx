@@ -23,6 +23,8 @@ export function WorkflowsView() {
   const [review, setReview] = useState<{ workflow: Workflow; request: ApprovalRequest } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"graph" | "list">("graph");
+  // Which runs the user opened or closed. Until then a run is open while it runs, and the newest one stays open.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const reviewRef = useRef(review);
   reviewRef.current = review;
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? `${id} (not installed)`;
@@ -149,21 +151,23 @@ export function WorkflowsView() {
             </span>
           </div>
           {runs.length === 0 && <p className="text-sm text-faint">Nothing has run yet.</p>}
-          {runs.map((r, i) => (
-            <details key={r.id} open={r.state === "running" || i === 0} className="rounded-lg border border-line px-3 py-2" data-run={r.state}>
-              <summary className="flex cursor-pointer items-center gap-2 text-sm">
+          {runs.map((r, i) => {
+            const isOpen = opened[r.id] ?? (r.state === "running" || i === 0);
+            return (
+            <details key={r.id} open={isOpen} className="rounded-lg border border-line px-3 py-2" data-run={r.state}>
+              <summary className="flex cursor-pointer items-center gap-2 text-sm" onClick={(e) => { e.preventDefault(); setOpened((o) => ({ ...o, [r.id]: !isOpen })); }}>
                 <span className="text-cloud">{r.name}</span>
                 <span className={`text-xs ${r.state === "succeeded" ? "text-teal" : r.state === "running" ? "text-cloud" : "text-warning"}`} data-run-state>{r.state}</span>
                 <span className="ml-auto text-[11px] text-faint">{r.createdAt}</span>
               </summary>
-              {mode === "graph" && (
+              {isOpen && mode === "graph" && (
                 <div className="mt-2">
                   <Suspense fallback={<p className="text-xs text-faint">Loading graph…</p>}>
                     <RunGraph run={r} agentName={agentName} onOpen={(sid) => void openSession(sid)} onDone={(stepId) => act(workflowApi.markDone(r.id, stepId))} onSkip={(stepId) => act(workflowApi.skip(r.id, stepId))} />
                   </Suspense>
                 </div>
               )}
-              {mode === "list" && (
+              {isOpen && mode === "list" && (
               <ul className="mt-2 space-y-1.5">
                 {r.steps.map((s) => {
                   const l = stepLabel(r, s);
@@ -189,7 +193,8 @@ export function WorkflowsView() {
                 </div>
               )}
             </details>
-          ))}
+            );
+          })}
         </section>
       </div>
     </div>
