@@ -60,3 +60,25 @@ Migration 5: table `worktrees` (`id`, `workspace_id` nullable with `ON DELETE SE
 2. **Removing a worktree always keeps its branch.** Deleting a branch is a separate action, not part of this stage.
 3. **The launcher option is off by default**, with a warning (a suggestion only, nothing forced) when another agent is already running in the same folder.
 4. **A worktree is not a workspace.** It is an attribute of the run, listed under its repository.
+
+## Implementation log (2026-11-23)
+Implemented on branch `feat/worktree-isolation`: `crates/core/src/git/worktree.rs` (plan, create, plan-remove, remove, approval actions, records), migration 5, the `create_worktree` and `remove_worktree` approval classes, session linkage, Tauri `worktree_*` commands and the opt-in on `agent_authorize`/`agent_launch`, and the launcher option, review, Git view controls, sidebar badge and Security list in the UI.
+
+Differences from, or additions to, the design above:
+- **The creation fingerprint omits the time part of the branch name** (it covers repository, base commit, agent and folder). A name that includes the time would change between the review and the launch, so a one-time approval could never match. The exact name is finalised at creation, and the review says so.
+- **The branch is named after the agent's display name**, not its id: `naurix/wt-agent-20261123-0436`, not `naurix/custom-18ea92...`. Found in the running app.
+- An action with **no workspace** (a worktree whose workspace was removed) is stored with a NULL workspace; `approvals.workspace_id` is a foreign key, so an empty id would have failed to insert.
+- A launch **previews both approvals before spending either**, so a missing approval never wastes the other; the worktree is created last, right before the session. A worktree whose folder was deleted by hand can be **forgotten** (Naurix's own record only, no Git change, so no approval).
+- `worktree_support` reuses the planning step to say whether the option can be offered, and why not.
+
+**Evidence from the running app** (sandbox, a real Git repository with a committed history and ignored `.env` and `node_modules`): a launch with nothing approved is refused and creates no worktree; with approvals the worktree is created, the agent starts in it and its branch appears in the sidebar; a terminal opened in the worktree works in that folder; removal is refused while an agent runs, refused while an untracked file exists, and refused without an approval, then succeeds with a reviewed once-approval. Afterwards the main repository is on `main`, clean, at the same commit; Git lists only the main worktree; the folder is gone; **the agent's branch is kept**; sessions are linked to the worktree and the agent session to its approval; the create and remove approvals are each `consumed` exactly once. In Core, a hostile repository (its own `post-checkout` hook, and one named by its config) is shown to fire for a plain `git worktree add` and not for Naurix's, and a repository with a local clean filter is refused until trusted.
+
+**Not verified:**
+1. The launcher checkbox, the same-folder warning, the two-part review, the Git view buttons and the Security list of left-behind worktrees were exercised through their commands, not looked at; they need a visual pass on macOS.
+2. Removing a worktree whose workspace is gone is covered in Core only, not in the app.
+3. No real agent CLI was started in a worktree, only the mock agent.
+4. Smudge filters from the user's global Git configuration (for example Git LFS) were not exercised; a repository needing LFS without `git-lfs` installed would fail the checkout and report Git's message.
+5. A very large repository may exceed the 120 second creation limit; submodules are not initialised (stated in the review). Neither was tried.
+6. Linux and Windows were not run (paths go through `platform`, as elsewhere).
+
+**Still pending the maintainer:** marking this ADR Accepted, after which PRD records GIT-006 and ORCH-006 as implemented and `AGENTS.md` lists stage 6 as done.
