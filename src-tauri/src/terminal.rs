@@ -190,6 +190,14 @@ pub struct SessionDto {
     running: bool,
     code: Option<u32>,
     signal: Option<String>,
+    /// The agent's last reported status (ADR 0029). Absent means "no signal", never "idle".
+    status: Option<StatusDto>,
+}
+
+#[derive(Serialize)]
+pub struct StatusDto {
+    kind: &'static str,
+    at: String,
 }
 
 /// Sessions the webview can attach to (after a reload it has forgotten them).
@@ -217,6 +225,10 @@ pub async fn session_list(
             adapter_id: i.adapter_id,
             started_at: i.started_at,
             running: i.exit.is_none(),
+            status: i.status.map(|s| StatusDto {
+                kind: s.kind.word(),
+                at: s.at,
+            }),
             code: i.exit.as_ref().and_then(|e| e.code),
             signal: i.exit.and_then(|e| e.signal),
         })

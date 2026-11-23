@@ -148,6 +148,8 @@ pub fn run() {
             if let Ok(s) = naurix_core::settings::get(&db) {
                 terminals.set_max_agents(usize::from(s.agents.max_concurrent));
             }
+            // No session survives a restart, so no status file is still wanted.
+            naurix_core::signals::purge(&dir);
             events::bridge_session_events(app.handle().clone(), &terminals);
             app.manage(terminals);
             Ok(())

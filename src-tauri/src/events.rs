@@ -26,6 +26,14 @@ enum LifecyclePayload {
         code: Option<u32>,
         signal: Option<String>,
     },
+    /// An agent's reported status (ADR 0029): a fixed word and a time, never content.
+    #[serde(rename_all = "camelCase")]
+    Status {
+        session: u64,
+        workspace_id: String,
+        kind: &'static str,
+        at: String,
+    },
 }
 
 fn payload(e: Event) -> LifecyclePayload {
@@ -54,6 +62,17 @@ fn payload(e: Event) -> LifecyclePayload {
             workspace_id,
             code,
             signal,
+        },
+        Event::SessionStatus {
+            session,
+            workspace_id,
+            kind,
+            at,
+        } => LifecyclePayload::Status {
+            session: session.0,
+            workspace_id,
+            kind: kind.word(),
+            at,
         },
     }
 }
@@ -98,6 +117,17 @@ mod tests {
         assert_eq!(
             j,
             serde_json::json!({"type":"started","session":5,"workspaceId":"w1","kind":"agent","adapterId":"codex"})
+        );
+        let j = serde_json::to_value(payload(Event::SessionStatus {
+            session: SessionId(6),
+            workspace_id: "w1".into(),
+            kind: naurix_core::signals::SignalKind::AwaitingApproval,
+            at: "2026-11-23T10:00:00Z".into(),
+        }))
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"type":"status","session":6,"workspaceId":"w1","kind":"awaiting_approval","at":"2026-11-23T10:00:00Z"})
         );
     }
 }

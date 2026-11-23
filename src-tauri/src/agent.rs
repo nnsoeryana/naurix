@@ -6,14 +6,16 @@ use crate::approval::SharedGate;
 use crate::mcp::{DataDir, SharedSecrets};
 use crate::terminal::{start_session, ExitPayload, SharedTerminals};
 use naurix_core::agents::{
-    adapter, launch_action, plan_launch, search_dirs, AgentCapability, AgentDef, AgentKind,
-    AgentStore, CapabilityInfo, CustomAgent, Feature,
+    adapter, adapter_for, launch_action, plan_launch, search_dirs, AgentCapability, AgentDef,
+    AgentKind, AgentStore, CapabilityInfo, CustomAgent, Feature,
 };
 use naurix_core::approval::{ApprovalGate, ApprovalRequest, Verdict};
 use naurix_core::git::worktree::{self, CreatePlan, WorktreeStore};
 use naurix_core::persistence::iso8601_utc_now;
 use naurix_core::persistence::{Db, SessionKind};
+use naurix_core::pty::SessionId;
 use naurix_core::session::SessionLaunch;
+use naurix_core::signals;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -230,8 +232,16 @@ fn action_for(
     ),
     String,
 > {
+    // Status hooks are part of the reviewed command, so the approval covers exactly what will run
+    // (ADR 0029). Off unless the user opted this agent in.
+    let status_args = naurix_core::settings::get(db)
+        .ok()
+        .filter(|s| s.agents.status_enabled(agent_id))
+        .and_then(|_| adapter_for(agent_id))
+        .and_then(|a| a.status_args())
+        .unwrap_or_default();
     let (def, plan) = AgentStore::new(db)
-        .prepare_launch(agent_id, &dirs())
+        .prepare_launch_with(agent_id, &dirs(), &status_args)
         .map_err(err)?;
     let ws = db.workspace(workspace_id).map_err(err)?;
     if !std::path::Path::new(&ws.root_path).is_dir() {
@@ -390,9 +400,29 @@ pub async fn agent_launch(
                 .map_err(err)?,
         );
     }
+    // Status hooks write to a private per-session file; the reviewed arguments only held a placeholder.
+    let (args, spool) = if plan
+        .args
+        .iter()
+        .any(|a| a.contains(signals::SPOOL_PLACEHOLDER))
+    {
+        let setup_failed = |e: String| {
+            format!("Status signals could not be set up ({e}). Turn them off in Settings, AI Agents, to start without them.")
+        };
+        let spool = signals::create_spool(&dir.0).map_err(|e| setup_failed(e.to_string()))?;
+        match signals::bind_spool(&plan.args, &spool) {
+            Some(a) => (a, Some(spool)),
+            None => {
+                let _ = std::fs::remove_file(&spool);
+                return Err(setup_failed("the data folder path is not usable".into()).into());
+            }
+        }
+    } else {
+        (plan.args.clone(), None)
+    };
     let launch = SessionLaunch {
         program: plan.program.to_string_lossy().into_owned(),
-        args: plan.args.clone(),
+        args,
         env,
         kind: SessionKind::Agent,
         title: def.name.clone(),
@@ -401,7 +431,7 @@ pub async fn agent_launch(
         worktree_id: worktree_id.clone(),
         cwd: cwd.clone(),
     };
-    start_session(
+    let started = start_session(
         terminals.inner(),
         &workspace_id,
         launch,
@@ -409,8 +439,16 @@ pub async fn agent_launch(
         cols,
         on_output,
         on_exit,
-    )
-    .map_err(|e| match cwd {
+    );
+    if let Some(sp) = spool {
+        match &started {
+            Ok(id) if terminals.watch_status(SessionId(*id), sp.clone()).is_ok() => {}
+            _ => {
+                let _ = std::fs::remove_file(&sp);
+            }
+        }
+    }
+    started.map_err(|e| match cwd {
         // The worktree was created but the agent could not start. It is not removed automatically
         // (removal is a Git change that needs its own approval), so say where it is.
         Some(p) => LaunchError::Error {
