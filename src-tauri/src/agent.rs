@@ -242,11 +242,12 @@ fn action_for(
 }
 
 /// Decide where a worktree for this launch would go (changes nothing) and the approval it needs.
+/// The branch is named after the agent's display name (not its id), so it reads well in Git.
 fn worktree_plan(
     db: &Arc<Db>,
     dir: &DataDir,
     workspace_id: &str,
-    agent_id: &str,
+    agent_name: &str,
 ) -> Result<(CreatePlan, naurix_core::approval::Action), String> {
     let ws = db.workspace(workspace_id).map_err(err)?;
     let trusted = |root: &std::path::Path| naurix_core::git::is_trusted(db, root);
@@ -255,7 +256,7 @@ fn worktree_plan(
         &trusted,
         &crate::worktree::root_dir(dir),
         workspace_id,
-        agent_id,
+        agent_name,
         &iso8601_utc_now(),
     )
     .map_err(err)?;
@@ -281,7 +282,7 @@ pub async fn agent_authorize(
     agent_id: String,
     worktree: Option<bool>,
 ) -> Result<AuthorizeDto, String> {
-    let (_, _, action) = action_for(&db, &workspace_id, &agent_id)?;
+    let (def, _, action) = action_for(&db, &workspace_id, &agent_id)?;
     let mut requests: Vec<ApprovalRequest> = required(gate.preview(&action).map_err(err)?)
         .into_iter()
         .collect();
@@ -292,7 +293,7 @@ pub async fn agent_authorize(
             gate.inner().clone(),
         );
         let wt = tauri::async_runtime::spawn_blocking(move || {
-            let (_, a) = worktree_plan(&db, &dir, &workspace_id, &agent_id)?;
+            let (_, a) = worktree_plan(&db, &dir, &workspace_id, &def.name)?;
             Ok::<_, String>(required(gate.preview(&a).map_err(err)?))
         })
         .await
@@ -335,7 +336,7 @@ pub async fn agent_launch(
             db.inner().clone(),
             DataDir(dir.0.clone()),
             workspace_id.clone(),
-            agent_id.clone(),
+            def.name.clone(),
         );
         Some(
             tauri::async_runtime::spawn_blocking(move || worktree_plan(&db, &dir, &ws, &ag))
