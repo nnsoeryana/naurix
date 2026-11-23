@@ -1,5 +1,5 @@
 # ADR 0027 — Central approval gate (orchestration stage 5)
-**Status:** Proposed (maintainer to accept; four decisions are listed at the end). **Design only; no code.** Implements the approval-gate half of stage 5 of ADR 0022 and proposes moving the Task/Run model to stage 8 (see §6).
+**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements the approval-gate half of stage 5 of ADR 0022 and proposes moving the Task/Run model to stage 8 (see §6).
 
 ## Context (from the code, 2026-11-23)
 ADR 0022 requires one centralized, scoped approval gate for every agent action. Today there are **four separate mechanisms**, each with its own storage and UI:
@@ -27,13 +27,14 @@ A new `crates/core/src/approval` module (no Tauri dependency). Flow, which gener
 This replaces the `reviewed: bool` parameter.
 
 ### 2. Scopes
-Scopes are those fixed in ADR 0022: **once**, **session**, **run / workflow run**, **workspace**. A grant stores `scope` and `scope_ref` (workspace id, and later a session or run id), so adding a scope later needs no new table. **Stage 5 enables only the scopes an action class uses now.** Requesting any other scope is rejected with a clear error.
+Scopes are those fixed in ADR 0022: **once**, **session**, **run / workflow run**, **workspace**, plus one narrow addition decided for stage 5: **app**, usable **only for launching a preset agent**, bound to the exact resolved executable path. It exists to keep today's behaviour (a reviewed preset is not asked about again in another workspace). No other action class may use it, so it is not an "approve everything" scope. A grant stores `scope` and `scope_ref` (workspace id, and later a session or run id), so adding a scope later needs no new table. **Stage 5 enables only the scopes an action class uses now.** Requesting any other scope is rejected with a clear error.
 
 Maximum scope per action class (ADR 0022 §4.2):
 
 | Class | Max scope | Stage |
 |---|---|---|
-| `LaunchAgent` | workspace (see decision 2 for today's wider behaviour) | **5** |
+| `LaunchAgent` (preset) | app, for that exact executable path | **5** |
+| `LaunchAgent` (custom) | workspace, chosen by the user; bound to the full fingerprint | **5** |
 | `SendInput` | session / run | later, with automated input |
 | `CreateWorktree` | once | stage 6 |
 | `WriteAgentConfig` | once | when MCP/skill sync moves to the gate |
@@ -66,7 +67,7 @@ ADR 0022 lists "Task/Run plus approval gate" for stage 5. Looking at the code, a
 A setting `maxConcurrentAgents` (default **4**, the only figure measured so far; range 1 to 16) counts **running agent sessions** only. Plain terminals are never limited (terminal-first). At the limit, launching fails with a clear message and nothing starts. The limit is a resource guard, not a safety control, and is enforced in Core when a session starts, not in the UI.
 
 ### 8. Migration and scope of this stage
-- Existing preset approvals (`agents.approved`) are **converted into gate grants on first start** so users are not re-prompted (see decision 2 for the scope they get). Custom agents were never stored as approved, so nothing converts.
+- Existing preset approvals (`agents.approved`) are **converted into gate grants on first start** so users are not re-prompted (they become **app**-scoped grants for that exact executable path). Custom agents were never stored as approved, so nothing converts.
 - **Not migrated in this stage:** MCP server approval, MCP and skill sync plans, and Git repository trust. They approve a *definition* or a *plan*, not an action, and work correctly today. They are listed in Security as they are now, and move to the gate when their stage needs it. Gate grants appear in a new section of the same screen.
 
 ### 9. Security properties
@@ -81,8 +82,8 @@ A setting `maxConcurrentAgents` (default **4**, the only figure measured so far;
 - ADR 0011 §6 and ADR 0007 §4 (review rules for launch) are superseded for the mechanism only; the rule "custom agents and the first launch of a preset are reviewed" still holds.
 - Risk: a regression in a path every user takes (launching an agent). Mitigation: migration of existing approvals, the mock-agent end-to-end test, and a manual check with a real agent before acceptance of the implementation.
 
-## Decisions needed from the maintainer
-1. **Move Task/Run to stage 8** (recommended, see §6), or build a `runs` table now.
-2. **Preset launch scope.** Today a preset approval covers every workspace. ADR 0022 says "granted for the workspace". Either keep today's behaviour with a narrow **app-wide scope limited to preset launches** (recommended: no re-prompt for existing users, and it amends the ADR 0022 scope list in one place), or make it per workspace (stricter, users re-approve once per workspace).
-3. **Custom agents.** Today they are reviewed every launch. Allow a **workspace-scoped approval** the user chooses (recommended, bound to the full fingerprint so any edit re-prompts), or keep "review every launch".
-4. **Concurrency limit default of 4**, range 1 to 16, agents only.
+## Decided by the maintainer (2026-11-23)
+1. **Task and Run move to stage 8** (workflows). Stage 5 is the gate, `sessions.approval_id` traceability and the concurrency limit. This amends the stage list of ADR 0022 and `AGENTS.md` once this ADR is accepted.
+2. **Preset launches keep today's behaviour** through the narrow **app** scope (preset launches only, exact executable path).
+3. **Custom agents may be approved for a workspace**, chosen by the user and bound to the full fingerprint (path, arguments, environment), so any edit asks again. Otherwise they are reviewed on every launch, as today.
+4. **Concurrency limit: default 4, range 1 to 16, counting running agent sessions only.**
