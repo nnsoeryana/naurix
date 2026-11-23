@@ -187,6 +187,55 @@ const MIGRATIONS: &[&str] = &[
        created_at TEXT NOT NULL
      );
      ALTER TABLE sessions ADD COLUMN worktree_id TEXT;",
+    // 6: workflows and runs (ADR 0030). Metadata only: ids, user-typed names, edges, states, times and a
+    // short fixed-vocabulary note. No prompts, arguments, paths or output. A run is a snapshot of its
+    // workflow; deleting the workflow keeps the run history.
+    "CREATE TABLE workflows (
+       id TEXT PRIMARY KEY,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       name TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     );
+     CREATE TABLE workflow_steps (
+       id TEXT PRIMARY KEY,
+       workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+       position INTEGER NOT NULL,
+       name TEXT NOT NULL,
+       agent_id TEXT NOT NULL
+     );
+     CREATE TABLE workflow_deps (
+       step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+       depends_on TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+       PRIMARY KEY (step_id, depends_on)
+     );
+     CREATE TABLE runs (
+       id TEXT PRIMARY KEY,
+       workflow_id TEXT REFERENCES workflows(id) ON DELETE SET NULL,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       name TEXT NOT NULL,
+       state TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       finished_at TEXT
+     );
+     CREATE INDEX runs_workspace ON runs(workspace_id, created_at);
+     CREATE TABLE run_steps (
+       id TEXT PRIMARY KEY,
+       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+       position INTEGER NOT NULL,
+       name TEXT NOT NULL,
+       agent_id TEXT NOT NULL,
+       state TEXT NOT NULL,
+       started_at TEXT,
+       finished_at TEXT,
+       exit_code INTEGER,
+       note TEXT
+     );
+     CREATE TABLE run_deps (
+       run_step_id TEXT NOT NULL REFERENCES run_steps(id) ON DELETE CASCADE,
+       depends_on TEXT NOT NULL REFERENCES run_steps(id) ON DELETE CASCADE,
+       PRIMARY KEY (run_step_id, depends_on)
+     );",
 ];
 
 pub struct Db {

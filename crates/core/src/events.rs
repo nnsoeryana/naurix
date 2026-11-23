@@ -28,6 +28,11 @@ pub enum Event {
         code: Option<u32>,
         signal: Option<String>,
     },
+    /// A workflow run or one of its steps changed state (ADR 0030). Ids only; re-read the run for detail.
+    RunChanged {
+        run_id: String,
+        workspace_id: String,
+    },
     /// An agent reported its status (ADR 0029). Only the fixed kind and the time; never content.
     SessionStatus {
         session: SessionId,

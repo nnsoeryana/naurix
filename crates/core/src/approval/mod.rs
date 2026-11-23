@@ -34,6 +34,9 @@ pub enum ActionClass {
     CreateWorktree,
     /// Remove a worktree Naurix created (a Git mutation: once only, ADR 0028).
     RemoveWorktree,
+    /// Run a whole workflow (ADR 0030): once only. Approving it lets Core create run-scoped grants
+    /// for the launches the reviewed workflow contains.
+    RunWorkflow,
 }
 
 impl ActionClass {
@@ -42,6 +45,7 @@ impl ActionClass {
             Self::LaunchAgent => "launch_agent",
             Self::CreateWorktree => "create_worktree",
             Self::RemoveWorktree => "remove_worktree",
+            Self::RunWorkflow => "run_workflow",
         }
     }
 }
@@ -56,6 +60,9 @@ pub enum Scope {
     Workspace,
     /// Every matching action in any workspace. Only for classes that allow it (preset agent launch).
     App,
+    /// Every matching launch made by one workflow run (ADR 0030). Never offered to the user to pick:
+    /// it is created by Core when a reviewed run is approved, and it ends with the run.
+    Run,
 }
 
 impl Scope {
@@ -64,6 +71,7 @@ impl Scope {
             Self::Once => "once",
             Self::Workspace => "workspace",
             Self::App => "app",
+            Self::Run => "run",
         }
     }
 }
@@ -317,46 +325,99 @@ impl ApprovalGate {
     }
 
     fn check(&self, action: &Action, consume: bool) -> Result<Verdict, ApprovalError> {
+        match self.find_grant(action, consume, None)? {
+            Some(approval_id) => Ok(Verdict::Allowed { approval_id }),
+            None => Ok(Verdict::Required(self.open_request(action.clone()))),
+        }
+    }
+
+    /// The id of a live grant that covers `action`, spending a matching "once" grant when `consume`.
+    /// A run-scoped grant counts only for the run it was created for (`run_id`).
+    fn find_grant(
+        &self,
+        action: &Action,
+        consume: bool,
+        run_id: Option<&str>,
+    ) -> Result<Option<String>, ApprovalError> {
         let now = iso8601_utc_now();
-        {
-            let c = self.db.c();
-            expire(&c, &now)?;
-            // Standing grants first, so a "once" grant is only spent when nothing broader applies.
-            for _ in 0..3 {
-                let hit: Option<(String, String)> = c
-                    .query_row(
-                        "SELECT id, scope FROM approvals
-                         WHERE class=?1 AND fingerprint=?2 AND state='active'
-                           AND (scope='app' OR (scope IN ('workspace','once') AND workspace_id IS ?3))
-                         ORDER BY CASE scope WHEN 'app' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END, created_at
-                         LIMIT 1",
-                        params![action.class.as_str(), action.fingerprint, action.workspace()],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?;
-                let Some((id, scope)) = hit else { break };
-                if !consume {
-                    return Ok(Verdict::Allowed { approval_id: id });
+        let c = self.db.c();
+        expire(&c, &now)?;
+        // Standing grants first, so a "once" grant is only spent when nothing broader applies.
+        for _ in 0..3 {
+            let hit: Option<(String, String)> = c
+                .query_row(
+                    "SELECT id, scope FROM approvals
+                     WHERE class=?1 AND fingerprint=?2 AND state='active'
+                       AND (scope='app'
+                            OR (scope IN ('workspace','once') AND workspace_id IS ?3)
+                            OR (scope='run' AND scope_ref=?4 AND workspace_id IS ?3))
+                     ORDER BY CASE scope WHEN 'app' THEN 0 WHEN 'workspace' THEN 1 WHEN 'run' THEN 2 ELSE 3 END, created_at
+                     LIMIT 1",
+                    params![action.class.as_str(), action.fingerprint, action.workspace(), run_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((id, scope)) = hit else { break };
+            if !consume {
+                return Ok(Some(id));
+            }
+            if scope == "once" {
+                let spent = c.execute(
+                    "UPDATE approvals SET state='consumed', last_used_at=?2, ended_at=?2 WHERE id=?1 AND state='active'",
+                    params![id, now],
+                )?;
+                if spent == 1 {
+                    prune(&c)?;
+                    return Ok(Some(id));
                 }
-                if scope == "once" {
-                    let spent = c.execute(
-                        "UPDATE approvals SET state='consumed', last_used_at=?2, ended_at=?2 WHERE id=?1 AND state='active'",
-                        params![id, now],
-                    )?;
-                    if spent == 1 {
-                        prune(&c)?;
-                        return Ok(Verdict::Allowed { approval_id: id });
-                    }
-                } else {
-                    c.execute(
-                        "UPDATE approvals SET last_used_at=?2 WHERE id=?1",
-                        params![id, now],
-                    )?;
-                    return Ok(Verdict::Allowed { approval_id: id });
-                }
+            } else {
+                c.execute(
+                    "UPDATE approvals SET last_used_at=?2 WHERE id=?1",
+                    params![id, now],
+                )?;
+                return Ok(Some(id));
             }
         }
-        Ok(Verdict::Required(self.open_request(action.clone())))
+        Ok(None)
+    }
+
+    /// Allow a launch made by run `run_id` if a standing grant or that run's own grant covers it.
+    /// Unlike [`authorize`](Self::authorize) it never opens a request: a run never asks in the middle.
+    pub fn authorize_in_run(
+        &self,
+        action: &Action,
+        run_id: &str,
+    ) -> Result<Option<String>, ApprovalError> {
+        self.find_grant(action, true, Some(run_id))
+    }
+
+    /// Create run-scoped grants for the launches of a run whose approval was just spent (ADR 0030).
+    /// One grant per distinct action; returns how many were created.
+    pub fn grant_run(&self, run_id: &str, actions: &[&Action]) -> Result<usize, ApprovalError> {
+        let now = iso8601_utc_now();
+        let c = self.db.c();
+        let mut made = 0;
+        let mut seen = std::collections::HashSet::new();
+        for a in actions {
+            if !seen.insert((a.class, a.fingerprint.clone())) {
+                continue;
+            }
+            c.execute(
+                "INSERT INTO approvals (id, class, scope, scope_ref, fingerprint, summary, workspace_id, state, created_at)
+                 VALUES (?1, ?2, 'run', ?3, ?4, ?5, ?6, 'active', ?7)",
+                params![self.new_request_id(), a.class.as_str(), run_id, a.fingerprint, a.summary, a.workspace(), now],
+            )?;
+            made += 1;
+        }
+        Ok(made)
+    }
+
+    /// End every grant that belongs to run `run_id`. Called when the run ends.
+    pub fn end_run(&self, run_id: &str) -> Result<usize, ApprovalError> {
+        Ok(self.db.c().execute(
+            "UPDATE approvals SET state='revoked', ended_at=?2 WHERE scope='run' AND scope_ref=?1 AND state='active'",
+            params![run_id, iso8601_utc_now()],
+        )?)
     }
 
     fn open_request(&self, action: Action) -> ApprovalRequest {

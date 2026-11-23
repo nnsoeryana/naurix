@@ -13,6 +13,7 @@ pub mod session;
 pub mod settings;
 pub mod signals;
 pub mod skills;
+pub mod workflow;
 
 /// Static information about the running build.
 #[derive(Debug, Clone, PartialEq, Eq)]
