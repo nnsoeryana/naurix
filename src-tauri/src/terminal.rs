@@ -71,6 +71,7 @@ pub async fn terminal_spawn(
     workspace_id: String,
     title: Option<String>,
     at_repo_root: Option<bool>,
+    worktree_id: Option<String>,
     rows: u16,
     cols: u16,
     on_output: Channel<InvokeResponseBody>,
@@ -78,7 +79,10 @@ pub async fn terminal_spawn(
 ) -> Result<u64, String> {
     // "Open repository in terminal": the backend works out the repository root itself; the webview
     // can never name a directory.
-    let cwd = if at_repo_root == Some(true) {
+    let cwd = if let Some(id) = worktree_id.as_deref() {
+        // A terminal in a worktree Naurix created: the folder comes from its record, never from the webview.
+        Some(crate::worktree::path_for(terminals.db(), id)?)
+    } else if at_repo_root == Some(true) {
         let ws = terminals
             .db()
             .workspace(&workspace_id)
@@ -102,7 +106,7 @@ pub async fn terminal_spawn(
         title: title.unwrap_or_else(|| "Terminal".into()),
         adapter_id: None,
         approval_id: None,
-        worktree_id: None,
+        worktree_id,
         cwd,
     };
     start_session(
@@ -181,6 +185,8 @@ pub struct SessionDto {
     title: String,
     adapter_id: Option<String>,
     started_at: String,
+    /// The branch of the Naurix-created worktree this session runs in, if any.
+    worktree_branch: Option<String>,
     running: bool,
     code: Option<u32>,
     signal: Option<String>,
@@ -191,10 +197,16 @@ pub struct SessionDto {
 pub async fn session_list(
     terminals: State<'_, SharedTerminals>,
 ) -> Result<Vec<SessionDto>, String> {
+    let store = naurix_core::git::worktree::WorktreeStore::new(terminals.db());
     Ok(terminals
         .list()
         .into_iter()
         .map(|i| SessionDto {
+            worktree_branch: i
+                .worktree_id
+                .as_deref()
+                .and_then(|w| store.get(w).ok().flatten())
+                .map(|w| w.branch),
             id: i.id.0,
             workspace_id: i.workspace_id,
             kind: match i.kind {

@@ -3,13 +3,15 @@
 //! program to be run.
 
 use crate::approval::SharedGate;
-use crate::mcp::SharedSecrets;
+use crate::mcp::{DataDir, SharedSecrets};
 use crate::terminal::{start_session, ExitPayload, SharedTerminals};
 use naurix_core::agents::{
     adapter, launch_action, plan_launch, search_dirs, AgentCapability, AgentDef, AgentKind,
     AgentStore, CapabilityInfo, CustomAgent, Feature,
 };
 use naurix_core::approval::{ApprovalGate, ApprovalRequest, Verdict};
+use naurix_core::git::worktree::{self, CreatePlan, WorktreeStore};
+use naurix_core::persistence::iso8601_utc_now;
 use naurix_core::persistence::{Db, SessionKind};
 use naurix_core::session::SessionLaunch;
 use serde::Serialize;
@@ -194,14 +196,18 @@ pub async fn agent_custom_delete(
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthorizeDto {
     Allowed,
-    Required { request: ApprovalRequest },
+    /// Everything that still needs a decision, each with a review the backend built. With a worktree
+    /// that is up to two: the agent launch, and the worktree creation (once only).
+    Required {
+        requests: Vec<ApprovalRequest>,
+    },
 }
 
-/// A launch failure the UI can act on: either an approval is needed, or a plain message.
+/// A launch failure the UI can act on: either approval is needed, or a plain message.
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LaunchError {
-    ApprovalRequired { request: Box<ApprovalRequest> },
+    ApprovalRequired { requests: Vec<ApprovalRequest> },
     Error { message: String },
 }
 
@@ -235,24 +241,74 @@ fn action_for(
     Ok((def, plan, action))
 }
 
-/// Ask whether this agent may start in this workspace. Does not spend a "once" grant. When approval
-/// is needed the answer carries a request whose display text was built here, to show to the user.
+/// Decide where a worktree for this launch would go (changes nothing) and the approval it needs.
+fn worktree_plan(
+    db: &Arc<Db>,
+    dir: &DataDir,
+    workspace_id: &str,
+    agent_id: &str,
+) -> Result<(CreatePlan, naurix_core::approval::Action), String> {
+    let ws = db.workspace(workspace_id).map_err(err)?;
+    let trusted = |root: &std::path::Path| naurix_core::git::is_trusted(db, root);
+    let plan = worktree::plan_create(
+        std::path::Path::new(&ws.root_path),
+        &trusted,
+        &crate::worktree::root_dir(dir),
+        workspace_id,
+        agent_id,
+        &iso8601_utc_now(),
+    )
+    .map_err(err)?;
+    let action = worktree::create_action(&plan, workspace_id);
+    Ok((plan, action))
+}
+
+fn required(v: Verdict) -> Option<ApprovalRequest> {
+    match v {
+        Verdict::Required(r) => Some(r),
+        Verdict::Allowed { .. } => None,
+    }
+}
+
+/// Ask whether this agent may start in this workspace, optionally in its own worktree. Spends nothing.
+/// When approval is needed the answer carries the requests, each with a review built here.
 #[tauri::command]
 pub async fn agent_authorize(
     db: State<'_, Arc<Db>>,
     gate: State<'_, SharedGate>,
+    dir: State<'_, DataDir>,
     workspace_id: String,
     agent_id: String,
+    worktree: Option<bool>,
 ) -> Result<AuthorizeDto, String> {
     let (_, _, action) = action_for(&db, &workspace_id, &agent_id)?;
-    Ok(match gate.preview(&action).map_err(err)? {
-        Verdict::Allowed { .. } => AuthorizeDto::Allowed,
-        Verdict::Required(request) => AuthorizeDto::Required { request },
+    let mut requests: Vec<ApprovalRequest> = required(gate.preview(&action).map_err(err)?)
+        .into_iter()
+        .collect();
+    if worktree == Some(true) {
+        let (db, dir, gate) = (
+            db.inner().clone(),
+            DataDir(dir.0.clone()),
+            gate.inner().clone(),
+        );
+        let wt = tauri::async_runtime::spawn_blocking(move || {
+            let (_, a) = worktree_plan(&db, &dir, &workspace_id, &agent_id)?;
+            Ok::<_, String>(required(gate.preview(&a).map_err(err)?))
+        })
+        .await
+        .map_err(err)??;
+        requests.extend(wt);
+    }
+    Ok(if requests.is_empty() {
+        AuthorizeDto::Allowed
+    } else {
+        AuthorizeDto::Required { requests }
     })
 }
 
-/// Launch an agent in a PTY inside a workspace. The approval gate decides: with no matching grant
-/// this fails with `ApprovalRequired` and starts nothing.
+/// Launch an agent in a PTY inside a workspace, optionally in a fresh worktree. The approval gate
+/// decides: without a matching grant for every action involved this fails with `ApprovalRequired` and
+/// starts nothing (and creates nothing).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn agent_launch(
@@ -260,8 +316,10 @@ pub async fn agent_launch(
     secrets: State<'_, SharedSecrets>,
     terminals: State<'_, SharedTerminals>,
     gate: State<'_, SharedGate>,
+    dir: State<'_, DataDir>,
     workspace_id: String,
     agent_id: String,
+    worktree: Option<bool>,
     rows: u16,
     cols: u16,
     on_output: Channel<InvokeResponseBody>,
@@ -270,12 +328,55 @@ pub async fn agent_launch(
     let (def, plan, action) = action_for(&db, &workspace_id, &agent_id)?;
     // Refuse before spending a one-time approval. `start` checks again atomically.
     terminals.ensure_agent_slot().map_err(err)?;
+
+    // Look at every approval first, without spending any, so a missing one never wastes another.
+    let wt = if worktree == Some(true) {
+        let (db, dir, ws, ag) = (
+            db.inner().clone(),
+            DataDir(dir.0.clone()),
+            workspace_id.clone(),
+            agent_id.clone(),
+        );
+        Some(
+            tauri::async_runtime::spawn_blocking(move || worktree_plan(&db, &dir, &ws, &ag))
+                .await
+                .map_err(err)??,
+        )
+    } else {
+        None
+    };
+    let mut missing: Vec<ApprovalRequest> = required(gate.preview(&action).map_err(err)?)
+        .into_iter()
+        .collect();
+    if let Some((_, a)) = &wt {
+        missing.extend(required(gate.preview(a).map_err(err)?));
+    }
+    if !missing.is_empty() {
+        return Err(LaunchError::ApprovalRequired { requests: missing });
+    }
+
     let approval_id = match gate.authorize(&action).map_err(err)? {
         Verdict::Allowed { approval_id } => approval_id,
-        Verdict::Required(request) => {
-            return Err(LaunchError::ApprovalRequired {
-                request: Box::new(request),
+        Verdict::Required(r) => return Err(LaunchError::ApprovalRequired { requests: vec![r] }),
+    };
+    // Create the worktree last, right before the session, so nothing irreversible happens for a launch
+    // that was going to be refused.
+    let (cwd, worktree_id) = match wt {
+        None => (None, None),
+        Some((plan, a)) => {
+            if let Verdict::Required(r) = gate.authorize(&a).map_err(err)? {
+                return Err(LaunchError::ApprovalRequired { requests: vec![r] });
+            }
+            let db2 = db.inner().clone();
+            let ws = workspace_id.clone();
+            let rec = tauri::async_runtime::spawn_blocking(move || {
+                let trusted = |root: &std::path::Path| naurix_core::git::is_trusted(&db2, root);
+                worktree::create(&plan, &trusted).map_err(err)?;
+                WorktreeStore::new(&db2).insert(&ws, &plan).map_err(err)
             })
+            .await
+            .map_err(err)??;
+            (Some(std::path::PathBuf::from(&rec.path)), Some(rec.id))
         }
     };
     // MCP secrets reach the agent as environment variables (its config file only holds references),
@@ -296,10 +397,10 @@ pub async fn agent_launch(
         title: def.name.clone(),
         adapter_id: Some(def.id.clone()),
         approval_id: Some(approval_id),
-        worktree_id: None,
-        cwd: None,
+        worktree_id: worktree_id.clone(),
+        cwd: cwd.clone(),
     };
-    Ok(start_session(
+    start_session(
         terminals.inner(),
         &workspace_id,
         launch,
@@ -307,9 +408,21 @@ pub async fn agent_launch(
         cols,
         on_output,
         on_exit,
-    )?)
+    )
+    .map_err(|e| match cwd {
+        // The worktree was created but the agent could not start. It is not removed automatically
+        // (removal is a Git change that needs its own approval), so say where it is.
+        Some(p) => LaunchError::Error {
+            message: format!(
+                "{e} The worktree was already created at {} and is listed in the Git view; remove it there if you do not need it.",
+                p.display()
+            ),
+        },
+        None => e.into(),
+    })
 }
 
+/// Agents already running in this workspace's own folder. See `worktree.rs`.
 /// The agent's reported version. Only for a preset whose exact executable the user approved for every
 /// workspace, because this runs `<executable> --version`.
 #[tauri::command]

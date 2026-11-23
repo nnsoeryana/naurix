@@ -11,6 +11,7 @@ mod settings;
 mod skills;
 mod terminal;
 mod workspace;
+mod worktree;
 
 use naurix_core::persistence::Db;
 use naurix_core::session::SessionManager;
@@ -174,6 +175,13 @@ pub fn run() {
             agent::agent_custom_save,
             agent::agent_custom_delete,
             agent::agent_authorize,
+            worktree::worktree_list,
+            worktree::worktree_support,
+            worktree::agents_in_workspace_folder,
+            worktree::session_worktree,
+            worktree::worktree_review_remove,
+            worktree::worktree_remove,
+            worktree::worktree_forget,
             agent::agent_launch,
             approval::approval_decide,
             approval::approval_list,
