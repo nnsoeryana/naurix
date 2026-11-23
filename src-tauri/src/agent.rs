@@ -232,6 +232,24 @@ fn action_for(
     ),
     String,
 > {
+    resolve(db, workspace_id, agent_id).map_err(|(_, message)| message)
+}
+
+/// Like [`action_for`], and says whether the agent was simply not found (the `bool`), which a workflow
+/// reports differently from any other failure.
+#[allow(clippy::type_complexity)]
+pub(crate) fn resolve(
+    db: &Db,
+    workspace_id: &str,
+    agent_id: &str,
+) -> Result<
+    (
+        AgentDef,
+        naurix_core::agents::LaunchPlan,
+        naurix_core::approval::Action,
+    ),
+    (bool, String),
+> {
     // Status hooks are part of the reviewed command, so the approval covers exactly what will run
     // (ADR 0029). Off unless the user opted this agent in.
     let status_args = naurix_core::settings::get(db)
@@ -242,13 +260,79 @@ fn action_for(
         .unwrap_or_default();
     let (def, plan) = AgentStore::new(db)
         .prepare_launch_with(agent_id, &dirs(), &status_args)
-        .map_err(err)?;
-    let ws = db.workspace(workspace_id).map_err(err)?;
+        .map_err(|e| {
+            (
+                matches!(e, naurix_core::agents::AgentError::NotFound { .. }),
+                err(e),
+            )
+        })?;
+    let ws = db.workspace(workspace_id).map_err(|e| (false, err(e)))?;
     if !std::path::Path::new(&ws.root_path).is_dir() {
-        return Err(format!("The workspace folder is missing: {}", ws.root_path));
+        return Err((
+            false,
+            format!("The workspace folder is missing: {}", ws.root_path),
+        ));
     }
     let action = launch_action(&def, &plan.program, workspace_id);
     Ok((def, plan, action))
+}
+
+/// Everything a launch needs beyond the reviewed command: MCP secrets as environment (only for agents whose
+/// MCP handling was verified, docs/AGENT_ADAPTERS.md) and, with status hooks, a private spool file that
+/// replaces the placeholder in the reviewed arguments. Shared by user launches and workflow steps.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_launch(
+    db: &Arc<Db>,
+    secrets: &SharedSecrets,
+    data_dir: &std::path::Path,
+    def: &AgentDef,
+    plan: &naurix_core::agents::LaunchPlan,
+    approval_id: String,
+    cwd: Option<PathBuf>,
+    worktree_id: Option<String>,
+) -> Result<(SessionLaunch, Option<PathBuf>), String> {
+    let mut env = plan.env.clone();
+    if adapter(&def.id).is_some_and(|a| a.acts_on(Feature::McpConfig)) {
+        env.extend(
+            naurix_core::mcp::McpStore::new(db, &**secrets)
+                .launch_environment()
+                .map_err(err)?,
+        );
+    }
+    // Status hooks write to a private per-session file; the reviewed arguments only held a placeholder.
+    let (args, spool) = if plan
+        .args
+        .iter()
+        .any(|a| a.contains(signals::SPOOL_PLACEHOLDER))
+    {
+        let setup_failed = |e: String| {
+            format!("Status signals could not be set up ({e}). Turn them off in Settings, AI Agents, to start without them.")
+        };
+        let spool = signals::create_spool(data_dir).map_err(|e| setup_failed(e.to_string()))?;
+        match signals::bind_spool(&plan.args, &spool) {
+            Some(a) => (a, Some(spool)),
+            None => {
+                let _ = std::fs::remove_file(&spool);
+                return Err(setup_failed("the data folder path is not usable".into()));
+            }
+        }
+    } else {
+        (plan.args.clone(), None)
+    };
+    Ok((
+        SessionLaunch {
+            program: plan.program.to_string_lossy().into_owned(),
+            args,
+            env,
+            kind: SessionKind::Agent,
+            title: def.name.clone(),
+            adapter_id: Some(def.id.clone()),
+            approval_id: Some(approval_id),
+            worktree_id,
+            cwd,
+        },
+        spool,
+    ))
 }
 
 /// Decide where a worktree for this launch would go (changes nothing) and the approval it needs.
@@ -390,47 +474,17 @@ pub async fn agent_launch(
             (Some(std::path::PathBuf::from(&rec.path)), Some(rec.id))
         }
     };
-    // MCP secrets reach the agent as environment variables (its config file only holds references),
-    // and only for agents whose MCP config handling was verified (docs/AGENT_ADAPTERS.md).
-    let mut env = plan.env.clone();
-    if adapter(&def.id).is_some_and(|a| a.acts_on(Feature::McpConfig)) {
-        env.extend(
-            naurix_core::mcp::McpStore::new(&db, &**secrets)
-                .launch_environment()
-                .map_err(err)?,
-        );
-    }
-    // Status hooks write to a private per-session file; the reviewed arguments only held a placeholder.
-    let (args, spool) = if plan
-        .args
-        .iter()
-        .any(|a| a.contains(signals::SPOOL_PLACEHOLDER))
-    {
-        let setup_failed = |e: String| {
-            format!("Status signals could not be set up ({e}). Turn them off in Settings, AI Agents, to start without them.")
-        };
-        let spool = signals::create_spool(&dir.0).map_err(|e| setup_failed(e.to_string()))?;
-        match signals::bind_spool(&plan.args, &spool) {
-            Some(a) => (a, Some(spool)),
-            None => {
-                let _ = std::fs::remove_file(&spool);
-                return Err(setup_failed("the data folder path is not usable".into()).into());
-            }
-        }
-    } else {
-        (plan.args.clone(), None)
-    };
-    let launch = SessionLaunch {
-        program: plan.program.to_string_lossy().into_owned(),
-        args,
-        env,
-        kind: SessionKind::Agent,
-        title: def.name.clone(),
-        adapter_id: Some(def.id.clone()),
-        approval_id: Some(approval_id),
-        worktree_id: worktree_id.clone(),
-        cwd: cwd.clone(),
-    };
+    let (launch, spool) = build_launch(
+        &db,
+        &secrets,
+        &dir.0,
+        &def,
+        &plan,
+        approval_id,
+        cwd.clone(),
+        worktree_id.clone(),
+    )
+    .map_err(LaunchError::from)?;
     let started = start_session(
         terminals.inner(),
         &workspace_id,

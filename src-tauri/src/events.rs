@@ -8,6 +8,15 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 pub const SESSION_LIFECYCLE: &str = "session://lifecycle";
+/// A workflow run or one of its steps changed (ADR 0030). Ids only; the view re-reads the run.
+pub const RUN_CHANGED: &str = "run://changed";
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RunPayload {
+    run_id: String,
+    workspace_id: String,
+}
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -36,8 +45,8 @@ enum LifecyclePayload {
     },
 }
 
-fn payload(e: Event) -> LifecyclePayload {
-    match e {
+fn payload(e: Event) -> Option<LifecyclePayload> {
+    Some(match e {
         Event::SessionStarted {
             session,
             workspace_id,
@@ -74,7 +83,9 @@ fn payload(e: Event) -> LifecyclePayload {
             kind: kind.word(),
             at,
         },
-    }
+        // Runs have their own event (`run://changed`), handled by the bridge.
+        Event::RunChanged { .. } => return None,
+    })
 }
 
 /// Forward session events to the webview until the bus is dropped.
@@ -84,7 +95,21 @@ pub fn bridge_session_events(app: AppHandle, terminals: &crate::terminal::Shared
         .name("session-events".into())
         .spawn(move || {
             for e in rx {
-                let _ = app.emit(SESSION_LIFECYCLE, payload(e));
+                if let Event::RunChanged {
+                    run_id,
+                    workspace_id,
+                } = &e
+                {
+                    let _ = app.emit(
+                        RUN_CHANGED,
+                        RunPayload {
+                            run_id: run_id.clone(),
+                            workspace_id: workspace_id.clone(),
+                        },
+                    );
+                } else if let Some(p) = payload(e) {
+                    let _ = app.emit(SESSION_LIFECYCLE, p);
+                }
             }
         });
 }
@@ -93,6 +118,15 @@ pub fn bridge_session_events(app: AppHandle, terminals: &crate::terminal::Shared
 mod tests {
     use super::*;
     use naurix_core::pty::SessionId;
+
+    #[test]
+    fn run_changes_use_their_own_event_not_the_lifecycle_one() {
+        assert!(payload(Event::RunChanged {
+            run_id: "r".into(),
+            workspace_id: "w".into()
+        })
+        .is_none());
+    }
 
     #[test]
     fn payload_is_camel_case_metadata_only() {

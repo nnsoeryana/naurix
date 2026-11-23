@@ -10,6 +10,7 @@ mod mcp;
 mod settings;
 mod skills;
 mod terminal;
+mod workflow;
 mod workspace;
 mod worktree;
 
@@ -136,13 +137,15 @@ pub fn run() {
             let gate: approval::SharedGate =
                 Arc::new(naurix_core::approval::ApprovalGate::new(db.clone()));
             let _ = naurix_core::agents::migrate_legacy_approvals(&db, &gate);
+            let engine_gate = gate.clone();
             app.manage(gate);
             app.manage(mcp::DataDir(dir.clone()));
             // Half-finished downloads from a previous run are never reused.
             let skills = naurix_core::skills::SkillStore::new(&db, &dir);
             skills.cleanup_staging();
             skills.seed_builtin();
-            app.manage::<mcp::SharedSecrets>(Arc::new(naurix_core::mcp::KeychainStore));
+            let secrets: mcp::SharedSecrets = Arc::new(naurix_core::mcp::KeychainStore);
+            app.manage(secrets.clone());
             let terminals: SharedTerminals =
                 Arc::new(SessionManager::new(db.clone(), TERMINATE_GRACE));
             if let Ok(s) = naurix_core::settings::get(&db) {
@@ -151,6 +154,14 @@ pub fn run() {
             // No session survives a restart, so no status file is still wanted.
             naurix_core::signals::purge(&dir);
             events::bridge_session_events(app.handle().clone(), &terminals);
+            // Workflows (ADR 0030): runs left over from a previous start become `interrupted`.
+            app.manage(workflow::start_engine(
+                db.clone(),
+                engine_gate,
+                terminals.clone(),
+                secrets,
+                dir.clone(),
+            ));
             app.manage(terminals);
             Ok(())
         })
@@ -172,6 +183,14 @@ pub fn run() {
             workspace::workspace_open,
             workspace::workspace_remove,
             workspace::session_recent,
+            workflow::workflow_list,
+            workflow::workflow_save,
+            workflow::workflow_delete,
+            workflow::workflow_run,
+            workflow::run_list,
+            workflow::run_mark_done,
+            workflow::run_skip,
+            workflow::run_cancel,
             agent::agent_list,
             agent::agent_set_path,
             agent::agent_custom_save,
