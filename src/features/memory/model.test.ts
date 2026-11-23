@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertTarget, insertText } from "./model";
+import { insertTarget, insertText, pasteRefusal } from "./model";
 
 describe("insertTarget", () => {
   const kinds = { a: { type: "agent", agentId: "x", name: "X" }, s: { type: "shell" } } as never;
@@ -22,5 +22,13 @@ describe("insertText", () => {
     expect(insertText({ title: "T", body: "line\n\n" })).toBe("T\nline");
     expect(insertText({ title: "T", body: "" })).toBe("T");
     expect(insertText({ title: "T", body: "b" }).endsWith("\n")).toBe(false);
+  });
+});
+
+describe("pasteRefusal", () => {
+  it("refuses several lines unless bracketed paste is on, and always allows one line", () => {
+    expect(pasteRefusal("a\nb", false)).toMatch(/every line break would act as Enter/);
+    expect(pasteRefusal("a\nb", true)).toBeNull();
+    expect(pasteRefusal("one line", false)).toBeNull();
   });
 });

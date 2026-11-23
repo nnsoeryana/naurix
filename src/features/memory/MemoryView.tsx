@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { activeSpace, useStore } from "../../state/store";
 import { terminalHandles } from "../terminal/handles";
 import { MAX_BODY, MAX_TITLE, memoryApi, type MemoryStatus, type Note } from "./api";
-import { insertTarget, insertText } from "./model";
+import { insertTarget, insertText, pasteRefusal } from "./model";
 
 const outline = "rounded border border-line px-2 py-0.5 text-xs text-muted hover:bg-raised disabled:opacity-40";
 const input = "w-full rounded border border-line bg-transparent px-2 py-1 text-sm";
@@ -55,7 +55,11 @@ export function MemoryView() {
     const tab = sp?.tabs.find((t) => t.id === sp.activeTabId);
     const t = insertTarget(tab?.activePaneId, s.paneKinds, s.paneState);
     if (!t.ok) return setError(t.reason);
-    terminalHandles.get(t.paneId)?.paste(insertText(n));
+    const handle = terminalHandles.get(t.paneId);
+    const text = insertText(n);
+    const refusal = pasteRefusal(text, handle?.bracketedPaste() ?? false);
+    if (refusal) return setError(refusal);
+    handle?.paste(text);
     setError(null);
     setView("terminal");
     terminalHandles.get(t.paneId)?.focus();

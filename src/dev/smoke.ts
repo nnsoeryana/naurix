@@ -8,6 +8,7 @@ import { agentApi } from "../features/agents/api";
 import { approvalApi } from "../features/approvals/api";
 import { worktreeApi } from "../features/worktrees/api";
 import { workflowApi } from "../features/workflows/api";
+import { memoryApi } from "../features/memory/api";
 import { workspaceApi } from "../features/workspaces/api";
 import { mcpApi } from "../features/mcp/api";
 import { dumpDevTerminals, getDevTerminal } from "./devTerminals";
@@ -114,6 +115,100 @@ export async function runSmoke() {
         out.listAfter = (await worktreeApi.list(wsId)).length;
         out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
         await report({ stage: "worktree", out });
+        return;
+      }
+      if (visual === "memory") {
+        // Project memory (ADR 0031) end to end through the Memory view.
+        const out: Record<string, unknown> = {};
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(120);
+          return cond();
+        };
+        const setValue = (el: HTMLElement, v: string) => {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, v);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        const click = (label: string) => all("button").find((b) => b.textContent === label)?.click();
+        const addNote = async (title: string, body: string) => {
+          q("[data-memory-new]")!.click();
+          await waitFor(() => !!q("[data-memory-editor]"));
+          setValue(q("[aria-label='Note title']")!, title);
+          setValue(q("[aria-label='Note text']")!, body);
+          await sleep(200);
+          q("[data-memory-save]")!.click();
+          await sleep(900);
+        };
+        st().setView("memory");
+        await sleep(900);
+        out.offText = q("[data-memory-off]")?.textContent ?? null;
+        out.saveWhileOff = await memoryApi.save(w.id, null, "t", "b").then(() => "saved", (e) => String(e));
+        (q("[data-memory-toggle]") as HTMLInputElement).click();
+        await waitFor(() => !!q("[data-memory-new]"));
+        await addNote("Database choice", "We use SQLite with FTS5 for search.");
+        await addNote("Naming", "Crates are named naurix-*.");
+        await addNote("Oneliner note", "");
+        out.afterThree = all("[data-note]").length;
+        // A secret is refused, names the line and kind, and is not stored.
+        const secret = "AKIAIOSFODNN7EXAMPLE";
+        await addNote("Deploy", `first line\naws ${secret}`);
+        out.secretError = q("[data-memory-error]")?.textContent ?? null;
+        out.secretEchoed = (q("[data-memory-error]")?.textContent ?? "").includes(secret);
+        click("Cancel");
+        await sleep(400);
+        out.countAfterSecret = (await memoryApi.status(w.id)).count;
+        // Search.
+        setValue(q("[aria-label='Search notes']")!, "fts");
+        await sleep(900);
+        out.searchFts = all("[data-note]").map((e) => e.textContent?.slice(0, 20));
+        setValue(q("[aria-label='Search notes']")!, "zzzz");
+        await sleep(900);
+        out.searchNone = all("[data-note]").length;
+        setValue(q("[aria-label='Search notes']")!, "");
+        await sleep(600);
+
+        // Insert: a running agent pane receives the text without Enter; a shell pane is refused.
+        const cat = (await agentApi.saveCustom({ name: "Cat agent", executable: "/bin/sh", args: ["-c", "cat"], env: [] })).find((a) => a.name === "Cat agent")!;
+        await st().refreshAgents();
+        const r = await agentApi.authorize(w.id, cat.id);
+        if (r.kind === "required") for (const x of r.requests) await approvalApi.decide(x.id, { decision: "allow", scope: "workspace" });
+        st().launchAgent(cat.id);
+        const agentPane = () => Object.entries(st().paneKinds).find(([, k]) => k.type === "agent")?.[0];
+        await waitFor(() => !!agentPane() && st().paneState[agentPane()!]?.kind === "running", 15000);
+        await sleep(800);
+        st().setView("memory");
+        await sleep(600);
+        // A note with several lines is refused for a program without bracketed paste (cat); a one-line note goes in.
+        const insertFor = (title: string) => (all("[data-note]").find((e) => e.textContent?.startsWith(title))?.querySelector("button") as HTMLElement | undefined)?.click();
+        insertFor("Naming");
+        await sleep(500);
+        out.multiLineRefusal = q("[data-memory-error]")?.textContent ?? null;
+        out.viewAfterRefusal = st().view;
+        insertFor("Oneliner note");
+        await sleep(1200);
+        const buf = () => (dumpDevTerminals()[agentPane()!] ?? []).join("\n");
+        out.viewAfterInsert = st().view;
+        out.agentBufferHasNote = buf().includes("Oneliner note");
+        out.agentBufferHasEnterEffect = buf().split("\n").filter((l) => l.includes("Oneliner note")).length;
+        out.agentBuffer = buf().slice(-160);
+        st().newTab(); // a plain shell becomes the active pane
+        await sleep(1800);
+        st().setView("memory");
+        await sleep(600);
+        insertFor("Oneliner note");
+        await sleep(500);
+        out.shellRefusal = q("[data-memory-error]")?.textContent ?? null;
+
+        // Turning it off hides the notes but keeps them; delete works.
+        (q("[data-memory-toggle]") as HTMLInputElement).click();
+        await sleep(900);
+        out.offAgain = q("[data-memory-off]")?.textContent ?? null;
+        out.noteRowsWhileOff = all("[data-note]").length;
+        out.statusOff = await memoryApi.status(w.id);
+        await report({ stage: "memory", out });
         return;
       }
       if (visual === "workflow") {

@@ -1,5 +1,5 @@
 # ADR 0031 — Opt-in project memory (orchestration stage 9)
-**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements stage 9 of ADR 0022 (§3) and MEM-001 to MEM-007. MEM-008 (delivery to agents) is implemented in its smallest user-driven form (§6); writing to agents' own memory files is deliberately not part of this stage.
+**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 9 of ADR 0022 (§3) and MEM-001 to MEM-007. MEM-008 (delivery to agents) is implemented in its smallest user-driven form (§6); writing to agents' own memory files is deliberately not part of this stage.
 
 ## Context
 ADR 0022 §3 decided the shape of memory: SQLite with FTS5, explicit and opt-in per workspace, never automatic, user-controlled, exportable, never committed to Git, never delivered silently. This ADR fixes the details.
@@ -53,3 +53,22 @@ Note text is never logged, never put in an error message, and never included in 
 1. **Delivery: a user-driven "insert into the agent's terminal" without Enter.** No agent files are written in this stage.
 2. **Suspected secrets are refused with no override.**
 3. **Only the user creates notes**, in the Naurix UI.
+
+## Implementation log (2026-11-23)
+Implemented on branch `feat/memory`: migration 7 (`memory_enabled`, `memory_notes`, the FTS5 table and its three triggers); `crates/core/src/memory` (store, search, export, repository check, and `secrets`, a dependency-free scanner); `src-tauri/src/memory.rs` (commands, and an export that opens its own save dialog); the Memory view; and the insert action. No new dependency.
+
+Differences from, or additions to, the design above:
+- **A multi-line note is inserted only when the agent turned on bracketed paste.** Found in the running app: a program without it (`cat`) took each pasted line break as Enter, so part of the note was "sent" before the user looked. The UI now refuses a multi-line insert in that case and says why; a one-line note always goes in. §6's "without pressing Enter" therefore also covers line breaks inside the note.
+- `memory_notes` has an integer `rid` key for the index (a TEXT key's implicit rowid can change on VACUUM, which would silently break an external-content FTS table).
+- Search always lists at most 50 results; with no query it lists the newest notes (at most 200).
+
+**Evidence from the running app** (sandbox): memory is off by default and a save is refused while off; switching it on works per workspace; two notes saved through the editor; an AWS-style key was refused with "Line 2 looks like an AWS access key" and the key text appears neither in the message nor in the database files; the count stayed at 2; search for a prefix found the right note and a non-matching word found none; with a running agent (`cat`) a multi-line note was refused, a one-line note was typed once (no Enter), and the view switched to the terminal; with a plain shell as the active pane the insert was refused with the reason; turning memory off hid the notes ("N saved notes are kept and hidden") and kept them in the database. In Core, 7 integration tests and 7 unit tests cover the opt-in default, per-workspace isolation, FTS5 ranking, prefix and accent folding, hostile queries, the index being emptied by edit, delete, delete-all **and workspace removal**, the limit, refusals on create and edit, and the export content (no ids or paths).
+
+**Not verified:**
+1. **The export in the app.** It opens a native save dialog and, inside a repository, a second native confirmation; neither was driven (a script cannot answer them). The Markdown and JSON content and the repository check are tested in Core only.
+2. The Memory view was clicked and read as text by a script; nobody has looked at it.
+3. A real agent CLI (Claude Code, Codex) was not used for the insert, so whether each enables bracketed paste in its input was not checked.
+4. The scanner is heuristic: it was tested on known token shapes and a set of ordinary notes, not on a large corpus, so both false refusals and misses are possible.
+5. Importing notes is not implemented (not requested). Windows and Linux were not run.
+
+**Still pending the maintainer:** marking this ADR Accepted, after which the PRD records MEM-001 to MEM-008 as implemented (MEM-008 in the user-driven form only) and `AGENTS.md` lists stage 9 as done.

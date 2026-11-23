@@ -117,7 +117,7 @@ export function TerminalView({ workspaceId, paneId, title, visible, focused, age
     };
     safeFit();
     handle.current = { fit: safeFit, focus: () => term.focus() };
-    terminalHandles.set(initial.current.paneId, { hasSelection: () => term.hasSelection(), getSelection: () => term.getSelection(), paste: (t) => term.paste(t), focus: () => term.focus() });
+    terminalHandles.set(initial.current.paneId, { hasSelection: () => term.hasSelection(), getSelection: () => term.getSelection(), paste: (t) => term.paste(t), bracketedPaste: () => term.modes.bracketedPasteMode, focus: () => term.focus() });
     if (import.meta.env.DEV) registerDevTerminal(initial.current.paneId, term);
 
     mounted.current = true;
