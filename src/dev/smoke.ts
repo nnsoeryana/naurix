@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useStore, activeSpace } from "../state/store";
 import { computeGeometry, paneIds } from "../features/layout/layout";
 import { sessionRegistry } from "../features/terminal/registry";
@@ -112,6 +113,62 @@ export async function runSmoke() {
         out.listAfter = (await worktreeApi.list(wsId)).length;
         out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
         await report({ stage: "worktree", out });
+        return;
+      }
+      if (visual === "status") {
+        // Status signals (ADR 0029) end to end. `claude-code` is pointed at scripts/mock-status-agent, which runs
+        // the hooks it was given the way Claude Code would. Off first (no hooks, plain Running), then opted in.
+        await agentApi.setPath("claude-code", `${cfg.workspace}/mock-status-agent`);
+        await st().refreshAgents();
+        const out: Record<string, unknown> = {};
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const last = (sel: string) => [...document.querySelectorAll(sel)].pop();
+        const label = () => last("[data-agent-status]")?.textContent ?? null;
+        const approve = async (wsId: string) => {
+          const r = await agentApi.authorize(wsId, "claude-code");
+          if (r.kind === "required") {
+            for (const q of r.requests) await approvalApi.decide(q.id, { decision: "allow", scope: "workspace" });
+          }
+          return r.kind === "required" ? r.requests[0].display : null;
+        };
+        out.offSettings = (await settingsApi.get()).agents;
+        out.reviewOff = await approve(w.id);
+        st().launchAgent("claude-code");
+        await sleep(2500);
+        out.offLabel = label();
+        out.offBuffer = (dumpDevTerminals()[agentPanes()[0]] ?? []).join("\n").slice(0, 200);
+        await sessionApi.close(sessionRegistry.get(agentPanes()[0])!);
+        await sleep(1000);
+
+        await st().updateSettings((x) => ({ ...x, agents: { ...x.agents, statusSignals: ["claude-code"] } }));
+        out.onSettings = (await settingsApi.get()).agents;
+        const again = await agentApi.authorize(w.id, "claude-code");
+        out.askedAgainAfterTurningOn = again.kind === "required";
+        out.reviewOn = await approve(w.id);
+        const evs: string[] = [];
+        await listen<{ type: string; kind?: string }>("session://lifecycle", (e) => evs.push(`${e.payload.type}:${e.payload.kind ?? ""}`));
+        st().launchAgent("claude-code");
+        const seen: string[] = [];
+        const end = Date.now() + 25000;
+        while (Date.now() < end) {
+          const l = label();
+          if (l && seen[seen.length - 1] !== l) seen.push(l);
+          if (l === "Turn finished") break;
+          await sleep(150);
+        }
+        out.labelsSeen = seen;
+        out.eventsSeen = evs;
+        out.storeStatus = st().sessionStatus;
+        const pane = agentPanes()[agentPanes().length - 1];
+        out.detail = last("[data-agent-detail]")?.getAttribute("title") ?? null;
+        out.buffer = (dumpDevTerminals()[pane] ?? []).join("\n").slice(0, 200);
+        // A reload must keep the status (Core owns it), and closing must clear it.
+        const sid = sessionRegistry.get(pane)!;
+        out.listedStatus = (await sessionApi.list()).find((x) => x.id === sid)?.status ?? null;
+        await sessionApi.close(sid);
+        await sleep(1500);
+        out.afterClose = (await sessionApi.list()).find((x) => x.id === sid)?.status ?? "closed";
+        await report({ stage: "status", out });
         return;
       }
       if (visual === "limit") {

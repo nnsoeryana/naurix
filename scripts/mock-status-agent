@@ -1,0 +1,27 @@
+#!/bin/sh
+# Dev stand-in for Claude Code (ADR 0029). It finds the hooks Naurix passed with `--settings` and runs
+# them the way Claude Code would: one command per event, with a payload on stdin that contains a
+# "secret" prompt, to show that no hook reads it. Used by the status smoke scenario.
+settings=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "--settings" ] && settings="$2"
+  shift
+done
+fire() {
+  [ -n "$settings" ] || return 0
+  SETTINGS="$settings" EVENT="$1" python3 -c '
+import json, os, subprocess
+for e in json.loads(os.environ["SETTINGS"])["hooks"].get(os.environ["EVENT"], []):
+    for h in e["hooks"]:
+        subprocess.run(h["command"], shell=True, input=b"{\"prompt\":\"SECRET-PROMPT-DO-NOT-STORE\"}")
+'
+}
+if [ -n "$settings" ]; then echo "mock status agent: hooks given"; else echo "mock status agent: hooks not given"; fi
+fire UserPromptSubmit
+sleep 3
+fire PermissionRequest
+sleep 5
+fire PostToolUse
+sleep 3
+fire Stop
+sleep 600
