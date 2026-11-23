@@ -5,6 +5,7 @@ import { sessionRegistry } from "../features/terminal/registry";
 import { sessionApi, terminalApi } from "../features/terminal/api";
 import { agentApi } from "../features/agents/api";
 import { approvalApi } from "../features/approvals/api";
+import { worktreeApi } from "../features/worktrees/api";
 import { workspaceApi } from "../features/workspaces/api";
 import { mcpApi } from "../features/mcp/api";
 import { dumpDevTerminals, getDevTerminal } from "./devTerminals";
@@ -40,6 +41,79 @@ export async function runSmoke() {
       const w = await workspaceApi.create(cfg.workspace!);
       await st().init();
       st().selectWorkspace(w.id);
+      if (visual === "worktree") {
+        // Agent worktrees (ADR 0028) end to end, against a real Git repository prepared by the shell.
+        const wsId = w.id;
+        const A = (await agentApi.saveCustom({ name: "WT Agent", executable: `${cfg.workspace}/mock-agent`, args: ["--wt"], env: [] })).find((a) => a.name === "WT Agent")!;
+        await st().refreshAgents();
+        const out: Record<string, unknown> = {};
+        const attempt = async (f: () => Promise<unknown>) => f().then(() => "ok", (e) => String(e));
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const paneText = (pane: string) => (dumpDevTerminals()[pane] ?? []).join("\n");
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(100);
+          return cond();
+        };
+        out.support = await worktreeApi.support(wsId);
+        const auth = await agentApi.authorize(wsId, A.id, true);
+        out.requestClasses = auth.kind === "required" ? auth.requests.map((r) => r.class) : [];
+        out.worktreeReview = auth.kind === "required" ? auth.requests.find((r) => r.class === "create_worktree")?.display : null;
+
+        st().launchAgent(A.id, { worktree: true }); // nothing approved yet: must be refused and create nothing
+        await sleep(2500);
+        out.unapproved = { ...st().paneState[agentPanes()[0]] };
+        out.worktreesAfterRefusal = (await worktreeApi.list(wsId)).length;
+
+        if (auth.kind === "required") {
+          for (const r of auth.requests) await approvalApi.decide(r.id, { decision: "allow", scope: r.class === "launch_agent" ? "workspace" : "once" });
+        }
+        st().launchAgent(A.id, { worktree: true });
+        await waitFor(() => agentPanes().length === 2 && st().paneState[agentPanes()[1]]?.kind === "running", 20000);
+        const apane = agentPanes()[1];
+        out.agent = { ...st().paneState[apane] };
+        await sleep(800);
+        const made = await worktreeApi.list(wsId);
+        out.created = made.map((m) => ({ branch: m.branch, path: m.path, exists: m.exists }));
+        out.branchBadge = (st().paneKinds[apane] as { branch?: string }).branch ?? null;
+        out.sidebarBadge = document.querySelector("[data-worktree-branch]")?.textContent ?? null;
+        const wt = made[0];
+
+        // A terminal inside the worktree (the backend resolves the folder). Leave an uncommitted file behind.
+        const shellPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "shell").map(([id]) => id);
+        st().newWorktreeTab("wt-shell", wt.id);
+        await waitFor(() => shellPanes().length >= 1 && st().paneState[shellPanes()[shellPanes().length - 1]]?.kind === "running", 15000);
+        const sh1 = shellPanes()[shellPanes().length - 1];
+        await sleep(600);
+        await type(sh1, "pwd; touch dirty.txt; exit\r");
+        await waitFor(() => st().paneState[sh1]?.kind === "exited" || !(sh1 in st().paneState), 10000);
+        out.shellPwd = paneText(sh1).split("\n").filter((l) => l.startsWith("/"))[0] ?? paneText(sh1).slice(-200);
+
+        out.removeWhileAgentRuns = await attempt(() => worktreeApi.reviewRemove(wt.id)); // an agent is still in it
+        await sessionApi.close(sessionRegistry.get(apane)!);
+        await sleep(1500);
+        out.removeWhenDirty = await attempt(() => worktreeApi.reviewRemove(wt.id)); // uncommitted file
+
+        st().newWorktreeTab("wt-shell2", wt.id);
+        await waitFor(() => shellPanes().length >= 2 && st().paneState[shellPanes()[shellPanes().length - 1]]?.kind === "running", 15000);
+        const sh2 = shellPanes()[shellPanes().length - 1];
+        await sleep(600);
+        await type(sh2, "rm dirty.txt; exit\r");
+        await waitFor(() => st().paneState[sh2]?.kind === "exited" || !(sh2 in st().paneState), 10000);
+        await sleep(800);
+
+        const review = await worktreeApi.reviewRemove(wt.id).catch((e) => String(e));
+        out.removeReview = typeof review === "string" ? review : review.display;
+        if (typeof review !== "string") {
+          out.removeWithoutApproval = await attempt(() => worktreeApi.remove(wt.id)); // must need the approval first
+          await approvalApi.decide(review.id, { decision: "allow", scope: "once" });
+          out.removed = await attempt(() => worktreeApi.remove(wt.id));
+        }
+        out.listAfter = (await worktreeApi.list(wsId)).length;
+        out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
+        await report({ stage: "worktree", out });
+        return;
+      }
       if (visual === "limit") {
         // The agent limit (ADR 0027): one slot. Agent B is approved ONCE; while A holds the slot B must be
         // refused WITHOUT spending that approval, and must start afterwards using the same approval.
