@@ -7,6 +7,7 @@ import { planReattach } from "../features/terminal/reattach";
 import { tildePath, uniqueTitle } from "../features/workspaces/path";
 import { workspaceApi, type SessionRecord, type Workspace } from "../features/workspaces/api";
 import { agentApi, type AgentInfo } from "../features/agents/api";
+import { isAgentSignalKind, type AgentSignal } from "../features/agents/status";
 import { gitApi, type StatusResult } from "../features/git/api";
 import { DEFAULT_SETTINGS, settingsApi, type Settings } from "../features/settings/api";
 import { resolveAppearance, type ResolvedTheme } from "../themes/resolve";
@@ -46,6 +47,9 @@ type State = {
   paneState: Record<string, TerminalState>;
   paneGen: Record<string, number>;
   paneKinds: Record<string, PaneKind>;
+  /** Last status an agent reported, by backend session id (ADR 0029). Absent means no signal. */
+  sessionStatus: Record<number, AgentSignal>;
+  setSessionStatus: (session: number, status: AgentSignal | null) => void;
   agents: AgentInfo[];
   launcherOpen: boolean;
   settings: Settings;
@@ -175,6 +179,16 @@ export const useStore = create<State>()((set, get) => {
     paneState: {},
     paneGen: {},
     paneKinds: {},
+    sessionStatus: {},
+    setSessionStatus: (session, status) =>
+      set((st) => {
+        if (!status) {
+          if (!(session in st.sessionStatus)) return {};
+          const { [session]: _gone, ...rest } = st.sessionStatus;
+          return { sessionStatus: rest };
+        }
+        return { sessionStatus: { ...st.sessionStatus, [session]: status } };
+      }),
     agents: [],
     launcherOpen: false,
     settings: DEFAULT_SETTINGS,
@@ -291,6 +305,8 @@ export const useStore = create<State>()((set, get) => {
             const tabId = uid("t");
             const title = uniqueTitle(it.title, (get().spaces[it.workspaceId]?.tabs ?? []).map((t) => t.title));
             set((st) => ({ paneKinds: { ...st.paneKinds, [paneId]: it.kind } }));
+            const reported = live.find((l) => l.id === it.sessionId)?.status;
+            if (reported && isAgentSignalKind(reported.kind)) get().setSessionStatus(it.sessionId, { kind: reported.kind, at: reported.at });
             patchSpace(it.workspaceId, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title, layout: leaf(paneId), activePaneId: paneId }], activeTabId: sp.activeTabId ?? tabId }));
           }
           const active = get().activeWorkspaceId;

@@ -124,6 +124,11 @@ export function SettingsView() {
             <Row label="Agents running at once" hint={`${AGENTS_MIN}–${AGENTS_MAX}. Starting another while this many run fails and starts nothing. Plain terminals are never limited. Lowering it does not stop agents that are already running.`}>
               <Draft aria-label="Agents running at once" type="number" min={AGENTS_MIN} max={AGENTS_MAX} className="w-24" value={String(settings.agents.maxConcurrent)} onCommit={(v) => agentsCfg({ maxConcurrent: Number(v) })} />
             </Row>
+            {agents.filter((a) => a.adapter?.capabilities.some((c) => c.feature === "status_signals" && c.level === "verified")).map((a) => (
+              <Row key={`status-${a.id}`} label={`${a.name}: show what it is doing`} hint="Off by default. When on, Naurix starts this agent with hooks that report only “working”, “waiting for approval”, “waiting for input” or “turn finished”, for that session only. Your own agent settings are not changed, and prompts, answers and commands are never read or stored. Turning it on or off asks you to review the launch command again.">
+                <Toggle label={`Show what ${a.name} is doing`} checked={settings.agents.statusSignals.includes(a.id)} onChange={(v) => agentsCfg({ statusSignals: v ? [...settings.agents.statusSignals, a.id] : settings.agents.statusSignals.filter((x) => x !== a.id) })} />
+              </Row>
+            ))}
             <p className="py-2 text-sm text-muted">Where each agent&apos;s program is found. Naurix never installs agents. Changing the executable asks you to review the command again.</p>
             {agents.map((a) => (
               <Row key={a.id} label={a.name} hint={a.kind === "custom" ? "Custom agent" : undefined}>

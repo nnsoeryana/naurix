@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { isAgentSignalKind } from "./features/agents/status";
 import { DialogHost } from "./components/Dialogs";
 import { AgentLauncher } from "./features/agents/AgentLauncher";
 import { PaneTree } from "./features/layout/PaneTree";
@@ -45,6 +47,22 @@ export default function App() {
     onChange();
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // What agents report about themselves (ADR 0029): a fixed word and a time, nothing else. The state is
+  // dropped when the process exits, so a stale report is never shown.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listen<{ type: string; session: number; kind?: string; at?: string }>("session://lifecycle", (e) => {
+      const p = e.payload;
+      if (p.type === "status" && p.kind && p.at && isAgentSignalKind(p.kind)) useStore.getState().setSessionStatus(p.session, { kind: p.kind, at: p.at });
+      else if (p.type === "exited") useStore.getState().setSessionStatus(p.session, null);
+    }).then((u) => (gone ? u() : (off = u)));
+    return () => {
+      gone = true;
+      off?.();
+    };
   }, []);
 
   // Git status is refreshed on events only (never on a timer): when the window regains focus.

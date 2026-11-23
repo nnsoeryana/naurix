@@ -25,6 +25,8 @@ export type LiveSession = {
   running: boolean;
   code: number | null;
   signal: string | null;
+  /** The agent's last reported status (ADR 0029); null means no signal. */
+  status: { kind: string; at: string } | null;
 };
 
 /**

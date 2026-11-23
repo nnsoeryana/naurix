@@ -117,7 +117,7 @@ export async function runSmoke() {
       if (visual === "limit") {
         // The agent limit (ADR 0027): one slot. Agent B is approved ONCE; while A holds the slot B must be
         // refused WITHOUT spending that approval, and must start afterwards using the same approval.
-        await st().updateSettings((x) => ({ ...x, agents: { maxConcurrent: 1 } }));
+        await st().updateSettings((x) => ({ ...x, agents: { ...x.agents, maxConcurrent: 1 } }));
         const mk = async (name: string, args: string[]) => (await agentApi.saveCustom({ name, executable: `${cfg.workspace}/mock-agent`, args, env: [] })).find((a) => a.name === name)!;
         const A = await mk("Agent A", ["--a"]);
         const B = await mk("Agent B", ["--b"]);

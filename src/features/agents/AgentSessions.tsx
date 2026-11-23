@@ -2,12 +2,13 @@ import { IconBot, IconPlus, IconStop } from "../../components/icons";
 import { SHORTCUTS } from "../../shortcuts";
 import { paneIds } from "../layout/layout";
 import { useStore } from "../../state/store";
+import { sessionRegistry } from "../terminal/registry";
 import { agentStatus } from "./status";
 
-const dot: Record<string, string> = { Starting: "bg-warning", Running: "bg-teal", Exited: "bg-faint", Failed: "bg-danger" };
+const dot: Record<string, string> = { Starting: "bg-warning", Running: "bg-teal", Exited: "bg-faint", Failed: "bg-danger", Working: "bg-teal", "Waiting for approval": "bg-warning", "Waiting for input": "bg-faint", "Turn finished": "bg-faint" };
 
 /** Only live states animate (transform/opacity only; off under prefers-reduced-motion). */
-const live = new Set(["Starting", "Running"]);
+const live = new Set(["Starting", "Running", "Working", "Waiting for approval"]);
 
 /** Agents section of the sidebar: launcher plus the agent sessions of the active workspace (AG-004). */
 export function AgentSessions() {
@@ -15,6 +16,7 @@ export function AgentSessions() {
   const space = useStore((s) => (s.activeWorkspaceId ? s.spaces[s.activeWorkspaceId] : undefined));
   const kinds = useStore((s) => s.paneKinds);
   const states = useStore((s) => s.paneState);
+  const signals = useStore((s) => s.sessionStatus);
   const reveal = useStore((s) => s.revealPane);
   const close = useStore((s) => s.closePane);
   const launcher = useStore((s) => s.openLauncher);
@@ -22,7 +24,7 @@ export function AgentSessions() {
   const items = (space?.tabs ?? []).flatMap((t) =>
     paneIds(t.layout)
       .filter((p) => kinds[p]?.type === "agent")
-      .map((p) => ({ paneId: p, name: (kinds[p] as { name: string }).name, branch: (kinds[p] as { branch?: string }).branch, status: agentStatus(states[p]) })),
+      .map((p) => ({ paneId: p, name: (kinds[p] as { name: string }).name, branch: (kinds[p] as { branch?: string }).branch, status: agentStatus(states[p], signals[sessionRegistry.get(p) ?? (kinds[p] as { sessionId?: number }).sessionId ?? -1]) })),
   );
 
   return (

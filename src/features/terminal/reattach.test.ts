@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { planReattach } from "./reattach";
 import type { LiveSession } from "./api";
 
-const s = (over: Partial<LiveSession>): LiveSession => ({ id: 1, workspaceId: "w1", kind: "terminal", title: "~/proj", adapterId: null, worktreeBranch: null, startedAt: "2026-11-21T00:00:00Z", running: true, code: null, signal: null, ...over });
+const s = (over: Partial<LiveSession>): LiveSession => ({ id: 1, workspaceId: "w1", kind: "terminal", title: "~/proj", adapterId: null, worktreeBranch: null, startedAt: "2026-11-21T00:00:00Z", running: true, code: null, signal: null, status: null, ...over });
 
 describe("planReattach", () => {
   it("returns one tab per session of a known workspace, oldest first", () => {

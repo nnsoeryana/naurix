@@ -18,7 +18,7 @@ export type Settings = {
     loginShell: boolean;
     shellPath: string | null;
   };
-  agents: { maxConcurrent: number };
+  agents: { maxConcurrent: number; /** Agents allowed to report their status (ADR 0029); off by default. */ statusSignals: string[] };
 };
 
 /** Mirrors `naurix_core::settings` defaults (used until the real values load). */
@@ -26,7 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   general: { closeOnCleanExit: true, confirmCloseRunning: true, naurixEnabled: true, naurixAnimations: true, naurixReduced: false },
   appearance: DEFAULT_APPEARANCE,
   terminal: { fontFamily: null, fontSize: 13, scrollback: 5000, cursorBlink: true, cursorStyle: "block", renderer: "dom", loginShell: true, shellPath: null },
-  agents: { maxConcurrent: 4 },
+  agents: { maxConcurrent: 4, statusSignals: [] },
 };
 
 export const SCROLLBACK_PRESETS = [1000, 5000, 10000, 50000];
