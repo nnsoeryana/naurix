@@ -139,12 +139,34 @@ fn valid_hex_color(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Most agents that may run at once (ADR 0027). Plain terminals are never limited.
+pub const AGENTS_MIN: u8 = 1;
+pub const AGENTS_MAX: u8 = 16;
+/// Four is the only concurrency figure measured so far (`bench/results`).
+pub const AGENTS_DEFAULT: u8 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Agents {
+    /// A resource guard, not a safety control: launching another agent at the limit fails and starts nothing.
+    pub max_concurrent: u8,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            max_concurrent: AGENTS_DEFAULT,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub general: General,
     pub appearance: Appearance,
     pub terminal: Terminal,
+    pub agents: Agents,
 }
 
 /// A CSS font-family list is assembled on the frontend from this string, so only characters that
@@ -195,6 +217,11 @@ pub fn validate(s: &Settings) -> Result<Settings, DbError> {
             "Scrollback must be between {SCROLLBACK_MIN} and {SCROLLBACK_MAX} lines."
         ));
     }
+    if !(AGENTS_MIN..=AGENTS_MAX).contains(&s.agents.max_concurrent) {
+        return bad(&format!(
+            "Agents running at once must be between {AGENTS_MIN} and {AGENTS_MAX}."
+        ));
+    }
     s.terminal.shell_path = match s.terminal.shell_path.as_deref().map(str::trim) {
         None | Some("") => None,
         Some(p) if is_executable_file(p) => Some(p.to_string()),
@@ -229,6 +256,9 @@ fn sanitize(mut s: Settings) -> Settings {
     }
     if !(SCROLLBACK_MIN..=SCROLLBACK_MAX).contains(&s.terminal.scrollback) {
         s.terminal.scrollback = d.scrollback;
+    }
+    if !(AGENTS_MIN..=AGENTS_MAX).contains(&s.agents.max_concurrent) {
+        s.agents.max_concurrent = AGENTS_DEFAULT;
     }
     s.terminal.shell_path = s
         .terminal
@@ -339,6 +369,34 @@ mod tests {
         assert_eq!(json["general"]["closeOnCleanExit"], false);
         assert_eq!(reset(&db).unwrap(), Settings::default());
         assert_eq!(get(&db).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn the_agent_limit_defaults_to_four_is_validated_and_read_tolerantly() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, 4);
+        assert_eq!(
+            serde_json::to_value(Settings::default()).unwrap()["agents"]["maxConcurrent"],
+            4
+        );
+        for ok in [AGENTS_MIN, 8, AGENTS_MAX] {
+            let mut s = Settings::default();
+            s.agents.max_concurrent = ok;
+            assert_eq!(update(&db, &s).unwrap().agents.max_concurrent, ok);
+        }
+        for bad in [0, AGENTS_MAX + 1, 255] {
+            let mut s = Settings::default();
+            s.agents.max_concurrent = bad;
+            assert!(update(&db, &s).is_err(), "{bad}");
+        }
+        // A stored document with an unusable value falls back to the default instead of failing.
+        db.set_setting(KEY, r#"{"agents":{"maxConcurrent":99}}"#)
+            .unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, AGENTS_DEFAULT);
+        // A document written before this setting existed still loads.
+        db.set_setting(KEY, r#"{"terminal":{"fontSize":14}}"#)
+            .unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, AGENTS_DEFAULT);
     }
 
     #[test]

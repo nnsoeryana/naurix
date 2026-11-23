@@ -142,7 +142,11 @@ pub fn run() {
             skills.cleanup_staging();
             skills.seed_builtin();
             app.manage::<mcp::SharedSecrets>(Arc::new(naurix_core::mcp::KeychainStore));
-            let terminals: SharedTerminals = Arc::new(SessionManager::new(db, TERMINATE_GRACE));
+            let terminals: SharedTerminals =
+                Arc::new(SessionManager::new(db.clone(), TERMINATE_GRACE));
+            if let Ok(s) = naurix_core::settings::get(&db) {
+                terminals.set_max_agents(usize::from(s.agents.max_concurrent));
+            }
             events::bridge_session_events(app.handle().clone(), &terminals);
             app.manage(terminals);
             Ok(())

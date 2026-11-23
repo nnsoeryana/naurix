@@ -268,6 +268,8 @@ pub async fn agent_launch(
     on_exit: Channel<ExitPayload>,
 ) -> Result<u64, LaunchError> {
     let (def, plan, action) = action_for(&db, &workspace_id, &agent_id)?;
+    // Refuse before spending a one-time approval. `start` checks again atomically.
+    terminals.ensure_agent_slot().map_err(err)?;
     let approval_id = match gate.authorize(&action).map_err(err)? {
         Verdict::Allowed { approval_id } => approval_id,
         Verdict::Required(request) => {

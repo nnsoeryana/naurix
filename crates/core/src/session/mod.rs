@@ -18,6 +18,7 @@ use crate::pty::{
 };
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,6 +29,8 @@ pub const DEFAULT_REPLAY_BYTES: usize = 1 << 20;
 /// Exited sessions kept for replay until closed. Bounds memory if a consumer never calls `close`.
 pub const MAX_EXITED_RETAINED: usize = 16;
 const MAX_TITLE_CHARS: usize = 100;
+/// Agents that may run at once until the setting is applied (ADR 0027).
+pub const DEFAULT_MAX_AGENTS: usize = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -41,6 +44,17 @@ pub enum SessionError {
     Pty(#[from] PtyError),
     #[error("{0}")]
     Thread(String),
+    #[error("{}", agent_limit_message(*running, *limit))]
+    AgentLimit { running: usize, limit: usize },
+}
+
+fn agent_limit_message(running: usize, limit: usize) -> String {
+    let (noun, verb) = if running == 1 {
+        ("agent", "is")
+    } else {
+        ("agents", "are")
+    };
+    format!("{running} {noun} {verb} already running (the limit is {limit}). Stop one, or raise the limit in Settings, AI Agents.")
 }
 
 /// What to start in a new session. Built only by the backend from validated data, never by the webview.
@@ -168,6 +182,9 @@ pub struct SessionManager {
     db: Arc<Db>,
     grace: Duration,
     replay_limit: usize,
+    max_agents: AtomicUsize,
+    /// Held for the whole start of an agent so the limit check and the registration are one step.
+    agent_start: Mutex<()>,
     entries: Mutex<HashMap<SessionId, Arc<Entry>>>,
     events: Arc<EventBus>,
 }
@@ -196,6 +213,8 @@ impl SessionManager {
             db,
             grace,
             replay_limit: DEFAULT_REPLAY_BYTES,
+            max_agents: AtomicUsize::new(DEFAULT_MAX_AGENTS),
+            agent_start: Mutex::new(()),
             entries: Mutex::new(HashMap::new()),
             events: Arc::new(EventBus::new()),
         }
@@ -205,6 +224,33 @@ impl SessionManager {
     pub fn with_replay_limit(mut self, bytes: usize) -> Self {
         self.replay_limit = bytes.max(1);
         self
+    }
+
+    /// Most agent sessions that may run at once. Lowering it never stops running agents; it only
+    /// refuses new ones. Plain terminals are never limited.
+    pub fn set_max_agents(&self, n: usize) {
+        self.max_agents.store(n.max(1), Ordering::Relaxed);
+    }
+
+    /// Agent sessions whose process is still running.
+    pub fn running_agents(&self) -> usize {
+        let all: Vec<Arc<Entry>> = self.entries.lock().unwrap().values().cloned().collect();
+        all.iter()
+            .filter(|e| e.kind == SessionKind::Agent && e.out.lock().unwrap().exit.is_none())
+            .count()
+    }
+
+    /// Fail if no agent slot is free. A quick look for callers that want to refuse before doing
+    /// anything irreversible (such as spending a one-time approval); `start` checks again atomically.
+    pub fn ensure_agent_slot(&self) -> Result<(), SessionError> {
+        let (running, limit) = (
+            self.running_agents(),
+            self.max_agents.load(Ordering::Relaxed),
+        );
+        if running >= limit {
+            return Err(SessionError::AgentLimit { running, limit });
+        }
+        Ok(())
     }
 
     /// Domain events about sessions (ADR 0024). Metadata only; delivery is lossy by design.
@@ -230,6 +276,11 @@ impl SessionManager {
         cols: u16,
         sink: impl FnMut(Outbound) -> bool + Send + 'static,
     ) -> Result<SessionId, SessionError> {
+        // Agents are counted and registered under one lock, so two launches cannot both take the last slot.
+        let _slot = (launch.kind == SessionKind::Agent).then(|| self.agent_start.lock().unwrap());
+        if launch.kind == SessionKind::Agent {
+            self.ensure_agent_slot()?;
+        }
         let ws = self.db.workspace(workspace_id)?;
         let cwd = launch.cwd.unwrap_or_else(|| PathBuf::from(&ws.root_path));
         if !cwd.is_dir() {
