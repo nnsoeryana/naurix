@@ -1,5 +1,5 @@
 # ADR 0028 — Opt-in Git worktree isolation for agents (orchestration stage 6)
-**Status:** Proposed (maintainer to accept; four decisions are listed at the end). **Design only; no code.** Implements stage 6 of ADR 0022 (§4.6) and the P2 requirement GIT-006. It makes the first **writing** use of Git in Naurix, which amends ADR 0005 and ADR 0017 ("nothing writes") for exactly the two operations below.
+**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-23, see the end). **Design only; no code.** Implements stage 6 of ADR 0022 (§4.6) and the P2 requirement GIT-006. It makes the first **writing** use of Git in Naurix, which amends ADR 0005 and ADR 0017 ("nothing writes") for exactly the two operations below.
 
 ## Context
 Two agents working in the same folder can overwrite each other's files, and nothing tells the user. A Git worktree gives each agent its own checkout of the same repository, on its own branch, in its own folder, so work stays separate and is merged with ordinary Git afterwards.
@@ -20,7 +20,7 @@ What exists today (from the code, 2026-11-23):
 - **Opt-in per launch.** The launcher offers "Run in a separate worktree", **off by default**, shown only when the workspace is a Git repository that is not Blocked. Existing behaviour does not change.
 - Command (argument array, no shell, through the existing hardened runner with a longer timeout): `git worktree add -b <branch> <path> <base>`. `<base>` is the commit `HEAD` points to at review time (resolved and shown as a short hash). A repository with no commits is refused with a clear message.
 - **Branch name:** `naurix/<agent-id>-<yyyymmdd-hhmm>`, with a numeric suffix if it exists. Characters outside `[a-z0-9._-/]` are replaced, and the result is validated with `git check-ref-format --branch` before anything is created.
-- **Location:** Naurix's own data folder, `<app data>/worktrees/<workspace id>/<branch slug>` (see decision 1 below), never a path the webview supplies. The path must not exist.
+- **Location:** Naurix's own data folder, `<app data>/worktrees/<workspace id>/<branch slug>` (maintainer decision 1), never a path the webview supplies. The path must not exist.
 - **Order, so nothing irreversible is wasted:** the agent limit is checked and the launch approval is authorized first; the worktree is created immediately before the session starts. If starting the session then fails, the worktree is **not** removed automatically (removal is a mutation that needs its own approval); the user is told where it is and it appears in the list for cleanup.
 - Fingerprint: class, repository root, branch, path and base commit. A change to any asks again.
 - Hardening carries over from ADR 0017, and hooks stay disabled. This means a repository's own `post-checkout`, `commit` and similar hooks do **not** run during creation; that is stated in the review. Smudge filters from the user's own (global) Git configuration still run, as they do for any checkout (for example Git LFS).
@@ -42,7 +42,7 @@ Migration 5: table `worktrees` (`id`, `workspace_id` nullable with `ON DELETE SE
 - Git view, Worktrees: a "created by Naurix" mark, **Open terminal here** and **Remove** (disabled with the reason when dirty, locked or in use).
 - Sidebar: an agent running in a worktree shows its branch.
 - Settings, Security: worktrees whose workspace is gone, with Remove.
-- A worktree is **not** added as a workspace (see decision 4 below).
+- A worktree is **not** added as a workspace (maintainer decision 4).
 
 ### 6. Limits stated up front
 - Cross-platform: path handling goes through `platform`; Windows and Linux are unvalidated as elsewhere (ADR 0021).
@@ -55,8 +55,8 @@ Migration 5: table `worktrees` (`id`, `workspace_id` nullable with `ON DELETE SE
 - Tests required: creation against a real repository (branch and folder exist, base is right, repo `HEAD` and working tree unchanged); a hostile repository with a `post-checkout` hook and a malicious `core.fsmonitor` (marker files must **not** appear, with a naive `git worktree add` shown to create them so the test is meaningful); a repository with a local clean/smudge filter is refused until trusted; no commits, bare repository, branch already exists, path exists; removal refuses dirty, locked and in-use worktrees and never passes `--force`; a once approval cannot be reused; a path or id the UI did not get from the backend is rejected; workspace removal leaves the folder and keeps a listed record; launch order (a failed launch leaves a listed worktree, never a silent deletion).
 - Risk: Git writing is new for Naurix. Mitigation: once-only approval, the hardened runner, no `--force`, no automatic deletion, and the hostile-repository tests.
 
-## Decisions needed from the maintainer
-1. **Where worktrees live.** Naurix's data folder (recommended: no macOS folder-access prompts, no clutter in the user's projects, one place to clean up), or a sibling folder next to the repository (visible to IDEs, but writes outside the workspace and may need extra folder permission).
-2. **Removal and branches.** Remove deletes only the checkout and keeps the branch (recommended: commits are never lost), or offers an extra "also delete the branch if fully merged".
-3. **Default.** Opt-in checkbox off, with a warning when another agent is already in the same folder (recommended), or off with no warning.
-4. **Is a worktree also a workspace?** No: it is an attribute of the run, listed under its repository (recommended), or it is added to the sidebar as its own workspace.
+## Decided by the maintainer (2026-11-23)
+1. **Worktrees live in Naurix's data folder** (`<app data>/worktrees/<workspace id>/<branch slug>`), not beside the repository.
+2. **Removing a worktree always keeps its branch.** Deleting a branch is a separate action, not part of this stage.
+3. **The launcher option is off by default**, with a warning (a suggestion only, nothing forced) when another agent is already running in the same folder.
+4. **A worktree is not a workspace.** It is an attribute of the run, listed under its repository.
