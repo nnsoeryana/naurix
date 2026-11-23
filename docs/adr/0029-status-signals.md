@@ -81,7 +81,7 @@ Differences from, or additions to, the design above:
 - **The interactive run completed the spike.** With `--permission-mode default` in the real TUI (Claude Code 2.1.329): `UserPromptSubmit` and `PostToolUse` fired (working), `PermissionRequest` fired (awaiting approval), and after the approval was answered the next signal was `PostToolUse` (working) and then `Stop` (turn done). `Notification` with matcher `idle_prompt` fired about a minute after a turn (idle). So **`PostToolUse` is the clearing event** for the approved path; the detail text still says the label is the agent's last report, not a live check.
 - **A session in an auto-approving permission mode asks nothing**, so `PermissionRequest` never fires (observed with this account's default; it fired only after `--permission-mode default`). The badge then simply never says "waiting for approval", which is correct.
 - **Status is tied to the reviewed launch.** The placeholder keeps the fingerprint stable across sessions; turning the setting on or off asks for approval again (tested with the real fingerprint function).
-- The agent list's "approved" mark is computed without the hooks, so it can show approved for an agent whose next launch asks again after the setting was turned on.
+- The agent list's "approved" mark and the version query now check the launch as it will really run, hooks included (fixed after the first implementation, with a test): after the setting is turned on, an agent approved without hooks no longer looks approved.
 - **Unix only for now**: on Windows `status_args` returns none and the setting is refused (the hook is a shell `printf`).
 - The spool is polled every 250 ms by one thread per watched session; no new dependency.
 

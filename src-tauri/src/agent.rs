@@ -72,13 +72,18 @@ fn describe(
     gate: &ApprovalGate,
     def: &AgentDef,
     dirs: &[PathBuf],
+    status_args: &[String],
 ) -> Result<AgentDto, String> {
     let over = store.path_override(&def.id).map_err(err)?;
     let plan = plan_launch(def, over.as_deref(), dirs).ok();
+    // "Approved" means the launch as it would run now, status hooks included, is covered.
     let approved = match (&plan, def.kind) {
-        (Some(p), AgentKind::Preset) => gate
-            .has_app_grant(&launch_action(def, &p.program, ""))
-            .map_err(err)?,
+        (Some(p), AgentKind::Preset) => {
+            let mut launching = def.clone();
+            launching.args.extend(status_args.iter().cloned());
+            gate.has_app_grant(&launch_action(&launching, &p.program, ""))
+                .map_err(err)?
+        }
         _ => false,
     };
     Ok(AgentDto {
@@ -117,7 +122,7 @@ fn list(db: &Db, gate: &ApprovalGate) -> Result<Vec<AgentDto>, String> {
         .all()
         .map_err(err)?
         .iter()
-        .map(|a| describe(&store, gate, a, &d))
+        .map(|a| describe(&store, gate, a, &d, &status_args_for(db, &a.id)))
         .collect()
 }
 
@@ -219,6 +224,17 @@ impl From<String> for LaunchError {
     }
 }
 
+/// Status hooks to add to this agent's launch (ADR 0029): part of the reviewed command, so the approval
+/// covers exactly what will run. Empty unless the user opted this agent in.
+pub(crate) fn status_args_for(db: &Db, agent_id: &str) -> Vec<String> {
+    naurix_core::settings::get(db)
+        .ok()
+        .filter(|s| s.agents.status_enabled(agent_id))
+        .and_then(|_| adapter_for(agent_id))
+        .and_then(|a| a.status_args())
+        .unwrap_or_default()
+}
+
 /// The launch action for this agent in this workspace, built entirely from backend data.
 fn action_for(
     db: &Db,
@@ -250,14 +266,7 @@ pub(crate) fn resolve(
     ),
     (bool, String),
 > {
-    // Status hooks are part of the reviewed command, so the approval covers exactly what will run
-    // (ADR 0029). Off unless the user opted this agent in.
-    let status_args = naurix_core::settings::get(db)
-        .ok()
-        .filter(|s| s.agents.status_enabled(agent_id))
-        .and_then(|_| adapter_for(agent_id))
-        .and_then(|a| a.status_args())
-        .unwrap_or_default();
+    let status_args = status_args_for(db, agent_id);
     let (def, plan) = AgentStore::new(db)
         .prepare_launch_with(agent_id, &dirs(), &status_args)
         .map_err(|e| {
@@ -527,7 +536,7 @@ pub async fn agent_version(
     let (db, gate) = (db.inner().clone(), gate.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
         AgentStore::new(&db)
-            .version_if_approved(&id, &dirs(), &gate)
+            .version_if_approved_with(&id, &dirs(), &gate, &status_args_for(&db, &id))
             .map_err(err)
     })
     .await

@@ -185,3 +185,57 @@ fn the_hook_arguments_are_part_of_the_reviewed_launch_and_off_changes_nothing() 
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_approved_check_covers_the_launch_as_it_will_run_including_status_hooks() {
+    use naurix_core::agents::{launch_action, AgentError, AgentStore};
+    use naurix_core::approval::{ApprovalGate, Decision, Scope, Verdict};
+    use std::os::unix::fs::PermissionsExt;
+    let (_, _, dir) = setup();
+    let exe = dir.join("claude");
+    std::fs::write(&exe, "#!/bin/sh\necho 1.2.3\n").unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let gate = ApprovalGate::new(db.clone());
+    let st = AgentStore::new(&db);
+    st.set_path_override("claude-code", Some(exe.to_str().unwrap()))
+        .unwrap();
+    let dirs = vec![dir.clone()];
+    let hooks = adapter_for("claude-code").unwrap().status_args().unwrap();
+
+    // Approved for every workspace without hooks: a version query is allowed, one with hooks is not.
+    let (def, plan) = st.prepare_launch("claude-code", &dirs).unwrap();
+    let Verdict::Required(r) = gate
+        .preview(&launch_action(&def, &plan.program, "w"))
+        .unwrap()
+    else {
+        panic!()
+    };
+    gate.decide(&r.id, Decision::Allow(Scope::App)).unwrap();
+    assert!(st
+        .version_if_approved_with("claude-code", &dirs, &gate, &[])
+        .is_ok());
+    assert!(
+        matches!(
+            st.version_if_approved_with("claude-code", &dirs, &gate, &hooks),
+            Err(AgentError::ReviewRequired)
+        ),
+        "turning the hooks on asks again, so the agent must not look approved"
+    );
+
+    // Approving the launch with the hooks makes that variant approved.
+    let (def2, plan2) = st
+        .prepare_launch_with("claude-code", &dirs, &hooks)
+        .unwrap();
+    let Verdict::Required(r2) = gate
+        .preview(&launch_action(&def2, &plan2.program, "w"))
+        .unwrap()
+    else {
+        panic!()
+    };
+    gate.decide(&r2.id, Decision::Allow(Scope::App)).unwrap();
+    assert!(st
+        .version_if_approved_with("claude-code", &dirs, &gate, &hooks)
+        .is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}

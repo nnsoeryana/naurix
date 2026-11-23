@@ -133,7 +133,20 @@ impl<'a> AgentStore<'a> {
         dirs: &[PathBuf],
         gate: &ApprovalGate,
     ) -> Result<Option<String>, AgentError> {
-        let def = self.get(id)?;
+        self.version_if_approved_with(id, dirs, gate, &[])
+    }
+
+    /// Like [`version_if_approved`](Self::version_if_approved), checking the approval of the launch as
+    /// it will really run, with `extra_args` (status hooks, ADR 0029) included in the fingerprint.
+    pub fn version_if_approved_with(
+        &self,
+        id: &str,
+        dirs: &[PathBuf],
+        gate: &ApprovalGate,
+        extra_args: &[String],
+    ) -> Result<Option<String>, AgentError> {
+        let mut def = self.get(id)?;
+        def.args.extend(extra_args.iter().cloned());
         let plan = plan_launch(&def, self.path_override(id)?.as_deref(), dirs)?;
         let action = launch_action(&def, &plan.program, "");
         if !gate
