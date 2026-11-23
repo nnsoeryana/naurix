@@ -53,5 +53,6 @@ export function describeScope(scope: string, workspaceName: string | null): stri
   if (scope === "app") return "Every workspace";
   if (scope === "workspace") return workspaceName ? `Workspace: ${workspaceName}` : "One workspace";
   if (scope === "once") return "Once";
+  if (scope === "run") return "This workflow run only";
   return scope;
 }

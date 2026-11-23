@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { cyclePane, hasPane, leaf, paneIds, removePane, setRatio, splitPane, type Layout, type Placement, type SplitDir } from "../features/layout/layout";
 import type { TerminalState } from "../features/terminal/TerminalView";
 import { sessionRegistry } from "../features/terminal/registry";
-import { sessionApi, terminalApi } from "../features/terminal/api";
-import { planReattach } from "../features/terminal/reattach";
+import { sessionApi, terminalApi, type LiveSession } from "../features/terminal/api";
+import { planReattach, type ReattachItem } from "../features/terminal/reattach";
 import { tildePath, uniqueTitle } from "../features/workspaces/path";
 import { workspaceApi, type SessionRecord, type Workspace } from "../features/workspaces/api";
 import { agentApi, type AgentInfo } from "../features/agents/api";
@@ -36,7 +36,7 @@ let gitInflight = false;
 let gitPending = false;
 const uid = (prefix: string) => `${prefix}${++counter}`;
 
-export type View = "home" | "terminal" | "mcp" | "skills" | "git" | "settings";
+export type View = "home" | "terminal" | "mcp" | "skills" | "git" | "workflows" | "settings";
 
 type State = {
   loaded: boolean;
@@ -75,6 +75,11 @@ type State = {
   init: () => Promise<void>;
   /** Bring back, as one tab each, the sessions Core kept running while the page was reloaded. */
   reattachSessions: () => Promise<void>;
+  /** Show a session Core already runs (for example a workflow step) in a pane, or reveal the pane that has it. */
+  openSession: (sessionId: number) => Promise<void>;
+  /** Incremented when a workflow run changes (ADR 0030); views re-read their runs. */
+  runTick: number;
+  bumpRuns: () => void;
   addWorkspace: () => Promise<void>;
   selectWorkspace: (id: string) => void;
   /** User picked a project: select it and, if it has no terminal yet, open one (unless a tool screen is showing). */
@@ -139,6 +144,16 @@ export const useStore = create<State>()((set, get) => {
   const patchSpace = (wsId: string, fn: (sp: Space) => Space) =>
     set((s) => ({ spaces: { ...s.spaces, [wsId]: fn(s.spaces[wsId] ?? { tabs: [], activeTabId: null }) } }));
 
+  /** One tab for a session Core already runs, with the status it last reported (ADR 0026, 0029). */
+  const adopt = (it: ReattachItem, live: LiveSession[]) => {
+    const paneId = uid("p");
+    const tabId = uid("t");
+    const title = uniqueTitle(it.title, (get().spaces[it.workspaceId]?.tabs ?? []).map((t) => t.title));
+    set((st) => ({ paneKinds: { ...st.paneKinds, [paneId]: it.kind } }));
+    const reported = live.find((l) => l.id === it.sessionId)?.status;
+    if (reported && isAgentSignalKind(reported.kind)) get().setSessionStatus(it.sessionId, { kind: reported.kind, at: reported.at });
+    patchSpace(it.workspaceId, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title, layout: leaf(paneId), activePaneId: paneId }], activeTabId: sp.activeTabId ?? tabId }));
+  };
   const loadPrevious = (wsId: string) =>
     workspaceApi.recentSessions(wsId).then((rows) => set((s) => ({ previous: { ...s.previous, [wsId]: rows } }))).catch(() => {});
 
@@ -301,13 +316,7 @@ export const useStore = create<State>()((set, get) => {
           for (const k of Object.values(get().paneKinds)) if (k.sessionId !== undefined) have.add(k.sessionId);
           for (const it of planReattach(live, known)) {
             if (have.has(it.sessionId)) continue;
-            const paneId = uid("p");
-            const tabId = uid("t");
-            const title = uniqueTitle(it.title, (get().spaces[it.workspaceId]?.tabs ?? []).map((t) => t.title));
-            set((st) => ({ paneKinds: { ...st.paneKinds, [paneId]: it.kind } }));
-            const reported = live.find((l) => l.id === it.sessionId)?.status;
-            if (reported && isAgentSignalKind(reported.kind)) get().setSessionStatus(it.sessionId, { kind: reported.kind, at: reported.at });
-            patchSpace(it.workspaceId, (sp) => ({ tabs: [...sp.tabs, { id: tabId, title, layout: leaf(paneId), activePaneId: paneId }], activeTabId: sp.activeTabId ?? tabId }));
+            adopt(it, live);
           }
           const active = get().activeWorkspaceId;
           if (active && (get().spaces[active]?.tabs.length ?? 0) > 0) set({ view: "terminal" });
@@ -318,6 +327,24 @@ export const useStore = create<State>()((set, get) => {
         reattachInflight = null;
       });
       return reattachInflight;
+    },
+
+    runTick: 0,
+    bumpRuns: () => set((s) => ({ runTick: s.runTick + 1 })),
+    openSession: async (sessionId) => {
+      try {
+        const own = Object.entries(get().paneKinds).find(([p, k]) => (sessionRegistry.get(p) ?? k.sessionId) === sessionId);
+        if (own) {
+          get().revealPane(own[0]);
+          return;
+        }
+        const live = await sessionApi.list();
+        const known = new Set(get().workspaces.map((w) => w.id));
+        for (const it of planReattach(live.filter((l) => l.id === sessionId), known)) adopt(it, live);
+        set({ view: "terminal" });
+      } catch (e) {
+        fail(e);
+      }
     },
 
     addWorkspace: async () => {
@@ -334,7 +361,7 @@ export const useStore = create<State>()((set, get) => {
     },
 
     selectWorkspace: (id) => {
-      set((st) => ({ activeWorkspaceId: id, view: ["mcp", "skills", "git", "settings"].includes(st.view) ? st.view : (st.spaces[id]?.tabs.length ?? 0) > 0 ? "terminal" : "home" }));
+      set((st) => ({ activeWorkspaceId: id, view: ["mcp", "skills", "git", "workflows", "settings"].includes(st.view) ? st.view : (st.spaces[id]?.tabs.length ?? 0) > 0 ? "terminal" : "home" }));
       workspaceApi.open(id).catch(() => {});
       void get().refreshGit();
       // Refresh availability (the folder may have been moved or deleted).
