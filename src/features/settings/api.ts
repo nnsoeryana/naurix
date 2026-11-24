@@ -18,6 +18,7 @@ export type Settings = {
     loginShell: boolean;
     shellPath: string | null;
   };
+  agents: { maxConcurrent: number; /** Agents allowed to report their status (ADR 0029); off by default. */ statusSignals: string[] };
 };
 
 /** Mirrors `naurix_core::settings` defaults (used until the real values load). */
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   general: { closeOnCleanExit: true, confirmCloseRunning: true, naurixEnabled: true, naurixAnimations: true, naurixReduced: false },
   appearance: DEFAULT_APPEARANCE,
   terminal: { fontFamily: null, fontSize: 13, scrollback: 5000, cursorBlink: true, cursorStyle: "block", renderer: "dom", loginShell: true, shellPath: null },
+  agents: { maxConcurrent: 4, statusSignals: [] },
 };
 
 export const SCROLLBACK_PRESETS = [1000, 5000, 10000, 50000];
@@ -32,6 +34,9 @@ export const FONT_MIN = 8;
 export const FONT_MAX = 32;
 export const SCROLLBACK_MIN = 500;
 export const SCROLLBACK_MAX = 100000;
+/** Agents that may run at once. Plain terminals are never limited (ADR 0027). */
+export const AGENTS_MIN = 1;
+export const AGENTS_MAX = 16;
 
 export type TrustedRepo = { key: string; path: string };
 export type SecurityInfo = {
@@ -59,6 +64,6 @@ export const settingsApi = {
 };
 
 /** Deep merge of a partial settings patch (used by the benchmark mode and tests). */
-export function mergeSettings(base: Settings, patch: { general?: Partial<Settings["general"]>; appearance?: Partial<Appearance>; terminal?: Partial<Settings["terminal"]> }): Settings {
-  return { general: { ...base.general, ...patch.general }, appearance: { ...base.appearance, ...patch.appearance }, terminal: { ...base.terminal, ...patch.terminal } };
+export function mergeSettings(base: Settings, patch: { general?: Partial<Settings["general"]>; appearance?: Partial<Appearance>; terminal?: Partial<Settings["terminal"]>; agents?: Partial<Settings["agents"]> }): Settings {
+  return { general: { ...base.general, ...patch.general }, appearance: { ...base.appearance, ...patch.appearance }, terminal: { ...base.terminal, ...patch.terminal }, agents: { ...base.agents, ...patch.agents } };
 }

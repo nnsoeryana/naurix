@@ -1,21 +1,28 @@
 //! Thin Tauri shell: validate IPC input, delegate to `naurix-core`.
 
 mod agent;
+mod approval;
 mod clipboard;
+mod events;
 mod git;
+mod lifecycle;
 mod mcp;
+mod memory;
 mod settings;
 mod skills;
 mod terminal;
+mod workflow;
 mod workspace;
+mod worktree;
 
 use naurix_core::persistence::Db;
+use naurix_core::session::SessionManager;
 use serde::Serialize;
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Manager;
-use terminal::{SharedTerminals, Terminals};
+use terminal::{SharedTerminals, TERMINATE_GRACE};
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -48,7 +55,13 @@ fn build_menu<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<
             &PredefinedMenuItem::hide_others(handle, None)?,
             &PredefinedMenuItem::show_all(handle, None)?,
             &PredefinedMenuItem::separator(handle)?,
-            &PredefinedMenuItem::quit(handle, None)?,
+            &MenuItem::with_id(
+                handle,
+                lifecycle::MENU_QUIT,
+                "Quit Naurix",
+                true,
+                Some("CmdOrCtrl+Q"),
+            )?,
         ],
     )?;
     let edit = Submenu::with_items(
@@ -83,7 +96,11 @@ pub fn run() {
     // The custom menu only exists to rebind Cmd+W on macOS. Linux and Windows get no menu bar:
     // terminal shortcuts are handled in the web view (see src/shortcuts.ts).
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(build_menu);
+    let builder = builder.menu(build_menu).on_menu_event(|app, event| {
+        if event.id() == lifecycle::MENU_QUIT {
+            lifecycle::request_quit(app);
+        }
+    });
     let app = builder
         .setup(|app| {
             // NAURIX_DATA_DIR (absolute path) points the app at a separate data folder, so tests and
@@ -116,20 +133,46 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
             db.prune_sessions(50).map_err(|e| e.to_string())?;
             app.manage(db.clone());
+            // Approval gate (ADR 0027). Earlier preset approvals become grants once, so nobody is asked
+            // again for what they already approved. A failure leaves the old setting for the next start.
+            let gate: approval::SharedGate =
+                Arc::new(naurix_core::approval::ApprovalGate::new(db.clone()));
+            let _ = naurix_core::agents::migrate_legacy_approvals(&db, &gate);
+            let engine_gate = gate.clone();
+            app.manage(gate);
             app.manage(mcp::DataDir(dir.clone()));
             // Half-finished downloads from a previous run are never reused.
             let skills = naurix_core::skills::SkillStore::new(&db, &dir);
             skills.cleanup_staging();
             skills.seed_builtin();
-            app.manage::<mcp::SharedSecrets>(Arc::new(naurix_core::mcp::KeychainStore));
-            app.manage::<SharedTerminals>(Arc::new(Terminals::new(db)));
+            let secrets: mcp::SharedSecrets = Arc::new(naurix_core::mcp::KeychainStore);
+            app.manage(secrets.clone());
+            let terminals: SharedTerminals =
+                Arc::new(SessionManager::new(db.clone(), TERMINATE_GRACE));
+            if let Ok(s) = naurix_core::settings::get(&db) {
+                terminals.set_max_agents(usize::from(s.agents.max_concurrent));
+            }
+            // No session survives a restart, so no status file is still wanted.
+            naurix_core::signals::purge(&dir);
+            events::bridge_session_events(app.handle().clone(), &terminals);
+            // Workflows (ADR 0030): runs left over from a previous start become `interrupted`.
+            app.manage(workflow::start_engine(
+                db.clone(),
+                engine_gate,
+                terminals.clone(),
+                secrets,
+                dir.clone(),
+            ));
+            app.manage(terminals);
             Ok(())
         })
+        .on_window_event(lifecycle::on_window_event)
         .on_page_load(|webview, payload| {
-            // A (re)load discards the JS state that owned any running sessions.
+            // A (re)load discards the JS state that held the output consumers, but not the sessions:
+            // they keep running and the new page reattaches (ADR 0026).
             if let tauri::webview::PageLoadEvent::Started = payload.event() {
                 if let Some(t) = webview.try_state::<SharedTerminals>() {
-                    t.shutdown();
+                    t.detach_all();
                 }
             }
         })
@@ -141,11 +184,38 @@ pub fn run() {
             workspace::workspace_open,
             workspace::workspace_remove,
             workspace::session_recent,
+            memory::memory_status,
+            memory::memory_set_enabled,
+            memory::memory_list,
+            memory::memory_save,
+            memory::memory_delete,
+            memory::memory_delete_all,
+            memory::memory_export,
+            workflow::workflow_list,
+            workflow::workflow_save,
+            workflow::workflow_delete,
+            workflow::workflow_run,
+            workflow::run_list,
+            workflow::run_mark_done,
+            workflow::run_skip,
+            workflow::run_cancel,
             agent::agent_list,
             agent::agent_set_path,
             agent::agent_custom_save,
             agent::agent_custom_delete,
+            agent::agent_authorize,
+            worktree::worktree_list,
+            worktree::worktree_support,
+            worktree::agents_in_workspace_folder,
+            worktree::session_worktree,
+            worktree::worktree_review_remove,
+            worktree::worktree_remove,
+            worktree::worktree_forget,
             agent::agent_launch,
+            approval::approval_decide,
+            approval::approval_list,
+            approval::approval_revoke,
+            approval::approval_revoke_all,
             mcp::mcp_list,
             mcp::mcp_catalog,
             mcp::mcp_catalog_input,
@@ -192,7 +262,10 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_ack,
             terminal::terminal_has_foreground_job,
-            terminal::terminal_terminate,
+            terminal::session_list,
+            terminal::session_attach,
+            terminal::session_detach,
+            terminal::session_close,
             terminal::debug_smoke,
             terminal::debug_smoke_visual,
             terminal::bench_config,
@@ -200,12 +273,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Naurix");
 
-    app.run(|handle, event| {
-        // Explicit shutdown policy (TECHNICAL_DESIGN §6): terminate all child sessions on exit.
-        if let tauri::RunEvent::Exit = event {
-            if let Some(t) = handle.try_state::<SharedTerminals>() {
-                t.shutdown();
-            }
-        }
-    });
+    app.run(lifecycle::on_run_event);
 }

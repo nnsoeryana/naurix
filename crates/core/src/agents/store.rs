@@ -1,11 +1,13 @@
-use super::def::{plan_launch, validate_custom, AgentDef, AgentKind, CustomAgent, LaunchPlan};
+use super::def::{launch_action, plan_launch, validate_custom, AgentDef, CustomAgent, LaunchPlan};
 use super::AgentError;
+use crate::approval::{ApprovalGate, Scope};
 use crate::persistence::Db;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const K_CUSTOM: &str = "agents.custom";
-const K_APPROVED: &str = "agents.approved";
+/// Pre-gate preset approvals (agent id -> program path). Read once by [`migrate_legacy_approvals`].
+const K_LEGACY_APPROVED: &str = "agents.approved";
 const MAX_CUSTOM: usize = 20;
 
 fn k_path(id: &str) -> String {
@@ -76,9 +78,8 @@ impl<'a> AgentStore<'a> {
                 .iter_mut()
                 .find(|a| a.id == agent.id)
                 .ok_or(AgentError::Unknown)?;
+            // Editing the command changes its approval fingerprint, so an earlier grant no longer matches.
             *slot = agent.clone();
-            // The command changed, so any earlier approval no longer applies.
-            self.revoke_approval(&agent.id)?;
         }
         self.write(K_CUSTOM, &all)?;
         Ok(agent)
@@ -92,7 +93,6 @@ impl<'a> AgentStore<'a> {
             return Err(AgentError::Unknown);
         }
         self.write(K_CUSTOM, &all)?;
-        self.revoke_approval(id)?;
         self.db.delete_setting(&k_path(id))?;
         Ok(())
     }
@@ -120,43 +120,39 @@ impl<'a> AgentStore<'a> {
                 self.write(&k_path(id), &p)?;
             }
         }
-        // A different executable must be reviewed again.
-        self.revoke_approval(id)
-    }
-
-    fn approvals(&self) -> Result<BTreeMap<String, String>, AgentError> {
-        self.read(K_APPROVED)
-    }
-
-    /// The program path the user approved for this agent, if any.
-    pub fn approved_program(&self, id: &str) -> Result<Option<String>, AgentError> {
-        Ok(self.approvals()?.get(id).cloned())
-    }
-
-    fn revoke_approval(&self, id: &str) -> Result<(), AgentError> {
-        let mut a = self.approvals()?;
-        if a.remove(id).is_some() {
-            self.write(K_APPROVED, &a)?;
-        }
+        // A different executable has a different fingerprint, so it is reviewed again.
         Ok(())
     }
 
-    pub fn approve(&self, id: &str, program: &Path) -> Result<(), AgentError> {
-        let mut a = self.approvals()?;
-        a.insert(id.to_string(), program.to_string_lossy().into_owned());
-        self.write(K_APPROVED, &a)
-    }
-
-    /// The version reported by an agent, only for an executable the user has already approved
-    /// (running `--version` executes the program, so unreviewed binaries are never run).
-    pub fn version_of_approved(
+    /// The version reported by an agent, only for a preset whose exact executable the user has
+    /// approved for every workspace (running `--version` executes the program, so unreviewed
+    /// binaries are never run). Custom agents cannot hold an app-wide grant, so they never qualify.
+    pub fn version_if_approved(
         &self,
         id: &str,
         dirs: &[PathBuf],
+        gate: &ApprovalGate,
     ) -> Result<Option<String>, AgentError> {
-        let def = self.get(id)?;
+        self.version_if_approved_with(id, dirs, gate, &[])
+    }
+
+    /// Like [`version_if_approved`](Self::version_if_approved), checking the approval of the launch as
+    /// it will really run, with `extra_args` (status hooks, ADR 0029) included in the fingerprint.
+    pub fn version_if_approved_with(
+        &self,
+        id: &str,
+        dirs: &[PathBuf],
+        gate: &ApprovalGate,
+        extra_args: &[String],
+    ) -> Result<Option<String>, AgentError> {
+        let mut def = self.get(id)?;
+        def.args.extend(extra_args.iter().cloned());
         let plan = plan_launch(&def, self.path_override(id)?.as_deref(), dirs)?;
-        if self.approved_program(id)?.as_deref() != Some(&*plan.program.to_string_lossy()) {
+        let action = launch_action(&def, &plan.program, "");
+        if !gate
+            .has_app_grant(&action)
+            .map_err(|e| AgentError::Storage(e.to_string()))?
+        {
             return Err(AgentError::ReviewRequired);
         }
         Ok(super::version::detect_version(
@@ -165,22 +161,51 @@ impl<'a> AgentStore<'a> {
         ))
     }
 
-    /// Build the launch plan and enforce the review rule (ADR 0007 §4): custom agents and
-    /// not-yet-approved presets must be explicitly reviewed (`reviewed == true`) for this launch.
+    /// Resolve an agent to a concrete launch. Approval is the gate's job (see `launch_action`).
     pub fn prepare_launch(
         &self,
         id: &str,
         dirs: &[PathBuf],
-        reviewed: bool,
     ) -> Result<(AgentDef, LaunchPlan), AgentError> {
-        let def = self.get(id)?;
-        let over = self.path_override(id)?;
-        let plan = plan_launch(&def, over.as_deref(), dirs)?;
-        let pre_approved = def.kind == AgentKind::Preset
-            && self.approved_program(id)?.as_deref() == Some(&*plan.program.to_string_lossy());
-        if !reviewed && !pre_approved {
-            return Err(AgentError::ReviewRequired);
-        }
+        self.prepare_launch_with(id, dirs, &[])
+    }
+
+    /// Like [`prepare_launch`](Self::prepare_launch) with `extra_args` appended to the agent's
+    /// arguments before anything is derived from them, so the reviewed command and its approval
+    /// fingerprint cover exactly what will run (used for status hooks, ADR 0029).
+    pub fn prepare_launch_with(
+        &self,
+        id: &str,
+        dirs: &[PathBuf],
+        extra_args: &[String],
+    ) -> Result<(AgentDef, LaunchPlan), AgentError> {
+        let mut def = self.get(id)?;
+        def.args.extend(extra_args.iter().cloned());
+        let plan = plan_launch(&def, self.path_override(id)?.as_deref(), dirs)?;
         Ok((def, plan))
     }
+}
+
+/// Turn the pre-gate preset approvals into gate grants, once, so users are not asked again for
+/// something they already approved. Each was an approval of an exact executable path for every
+/// workspace, which is the "app" scope. The old setting is removed afterwards. Entries for agents
+/// that no longer exist are dropped. Returns how many grants were created.
+pub fn migrate_legacy_approvals(db: &Db, gate: &ApprovalGate) -> Result<usize, AgentError> {
+    let store = AgentStore::new(db);
+    let legacy: BTreeMap<String, String> = store.read(K_LEGACY_APPROVED)?;
+    let mut created = 0;
+    for (id, program) in &legacy {
+        let Some(def) = AgentDef::preset(id) else {
+            continue;
+        };
+        let action = launch_action(&def, Path::new(program), "");
+        if gate
+            .import_grant(&action, Scope::App)
+            .map_err(|e| AgentError::Storage(e.to_string()))?
+        {
+            created += 1;
+        }
+    }
+    db.delete_setting(K_LEGACY_APPROVED)?;
+    Ok(created)
 }

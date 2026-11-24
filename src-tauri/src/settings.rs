@@ -24,14 +24,22 @@ pub async fn settings_get(db: State<'_, Arc<Db>>) -> Result<Settings, String> {
 #[tauri::command]
 pub async fn settings_update(
     db: State<'_, Arc<Db>>,
+    terminals: State<'_, SharedTerminals>,
     settings: Settings,
 ) -> Result<Settings, String> {
-    settings::update(&db, &settings).map_err(err)
+    let saved = settings::update(&db, &settings).map_err(err)?;
+    terminals.set_max_agents(usize::from(saved.agents.max_concurrent));
+    Ok(saved)
 }
 
 #[tauri::command]
-pub async fn settings_reset(db: State<'_, Arc<Db>>) -> Result<Settings, String> {
-    settings::reset(&db).map_err(err)
+pub async fn settings_reset(
+    db: State<'_, Arc<Db>>,
+    terminals: State<'_, SharedTerminals>,
+) -> Result<Settings, String> {
+    let saved = settings::reset(&db).map_err(err)?;
+    terminals.set_max_agents(usize::from(saved.agents.max_concurrent));
+    Ok(saved)
 }
 
 #[derive(Serialize)]

@@ -107,10 +107,10 @@ fn restart_marks_active_sessions_interrupted() {
     let proj = tmpdir("sess");
     let w = db.create_workspace(proj.to_str().unwrap()).unwrap();
     let a = db
-        .insert_session(&w.id, SessionKind::Terminal, "one", None)
+        .insert_session(&w.id, SessionKind::Terminal, "one", None, None)
         .unwrap();
     let b = db
-        .insert_session(&w.id, SessionKind::Terminal, "two", None)
+        .insert_session(&w.id, SessionKind::Terminal, "two", None, None)
         .unwrap();
     db.finish_session(&b, "exited").unwrap();
 
@@ -130,7 +130,7 @@ fn removing_a_workspace_removes_its_sessions() {
     let db = Db::open_in_memory().unwrap();
     let proj = tmpdir("cascade");
     let w = db.create_workspace(proj.to_str().unwrap()).unwrap();
-    db.insert_session(&w.id, SessionKind::Terminal, "t", None)
+    db.insert_session(&w.id, SessionKind::Terminal, "t", None, None)
         .unwrap();
     db.remove_workspace(&w.id).unwrap();
     let n: i64 = db
@@ -147,7 +147,7 @@ fn prune_keeps_newest_per_workspace() {
     let proj = tmpdir("prune");
     let w = db.create_workspace(proj.to_str().unwrap()).unwrap();
     for i in 0..5 {
-        db.insert_session(&w.id, SessionKind::Terminal, &format!("s{i}"), None)
+        db.insert_session(&w.id, SessionKind::Terminal, &format!("s{i}"), None, None)
             .unwrap();
     }
     assert_eq!(db.prune_sessions(2).unwrap(), 3);

@@ -7,7 +7,7 @@ import { resolveAppearance } from "../../themes/resolve";
 import { DEFAULT_SETTINGS } from "../settings/api";
 import { detectCompletions, displayMode, motionLevel, statusText, summarize } from "./state";
 
-const agent: PaneKind = { type: "agent", agentId: "a", name: "A", reviewed: true };
+const agent: PaneKind = { type: "agent", agentId: "a", name: "A" };
 const shell: PaneKind = { type: "shell" };
 const run: TerminalState = { kind: "running" };
 const ok: TerminalState = { kind: "exited", code: 0, signal: null };

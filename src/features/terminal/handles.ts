@@ -9,6 +9,8 @@ export type TerminalHandle = {
   getSelection: () => string;
   /** Paste with bracketed-paste handling (xterm decides based on the app's mode). */
   paste: (text: string) => void;
+  /** Whether the program in the terminal asked for bracketed paste, so pasted newlines are not taken as Enter. */
+  bracketedPaste: () => boolean;
   focus: () => void;
   /** Search the pane's retained buffer (TERM-010). The query is never stored. */
   find: {

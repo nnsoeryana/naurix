@@ -26,3 +26,13 @@ Format: Context → Decision → Consequences. Status: Proposed | Accepted | Sup
 | [0019](0019-no-credential-storage.md) | Naurix stores no credentials | Accepted (partially implemented) |
 | [0020](0020-theme-system.md) | Theme system | Accepted |
 | [0021](0021-windows-linux-readiness.md) | Windows and Linux readiness | Accepted (implemented, unvalidated) |
+| [0022](0022-orchestration-workspace-scope.md) | Orchestration workspace scope, session lifecycle and shared project memory | Accepted |
+| [0023](0023-session-ownership-in-core.md) | Session ownership moves into Core (orchestration stage 1) | Accepted |
+| [0024](0024-domain-event-bus.md) | Domain event bus in Core (orchestration stage 2) | Accepted |
+| [0025](0025-agent-adapter-trait.md) | `AgentAdapter` trait for per-agent behaviour (orchestration stage 3) | Accepted |
+| [0026](0026-sessions-outlive-the-view.md) | Sessions outlive the view: detach, reattach and window close (orchestration stage 4) | Accepted (implemented; manual macOS checks pending) |
+| [0027](0027-approval-gate.md) | Central approval gate (orchestration stage 5) | Accepted (implemented; visual and real-agent checks pending) |
+| [0028](0028-worktree-isolation.md) | Opt-in Git worktree isolation for agents (orchestration stage 6) | Accepted (implemented; visual and real-agent checks pending) |
+| [0029](0029-status-signals.md) | Verified status signals per agent, Claude Code first (orchestration stage 7) | Accepted (implemented for Claude Code; interactive refusal path and other platforms unverified) |
+| [0030](0030-workflows-and-runs.md) | Reusable workflows and runs (orchestration stage 8) | Proposed (implemented; visual and real-agent checks pending) |
+| [0031](0031-project-memory.md) | Opt-in project memory (orchestration stage 9) | Proposed (implemented; export dialog and real-agent checks pending) |

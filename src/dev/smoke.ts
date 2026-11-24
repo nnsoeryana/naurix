@@ -1,9 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useStore, activeSpace } from "../state/store";
 import { computeGeometry, paneIds } from "../features/layout/layout";
 import { sessionRegistry } from "../features/terminal/registry";
-import { terminalApi } from "../features/terminal/api";
+import { sessionApi, terminalApi } from "../features/terminal/api";
 import { agentApi } from "../features/agents/api";
+import { approvalApi } from "../features/approvals/api";
+import { worktreeApi } from "../features/worktrees/api";
+import { workflowApi } from "../features/workflows/api";
+import { memoryApi } from "../features/memory/api";
 import { workspaceApi } from "../features/workspaces/api";
 import { mcpApi } from "../features/mcp/api";
 import { dumpDevTerminals, getDevTerminal } from "./devTerminals";
@@ -39,6 +44,609 @@ export async function runSmoke() {
       const w = await workspaceApi.create(cfg.workspace!);
       await st().init();
       st().selectWorkspace(w.id);
+      if (visual === "worktree") {
+        // Agent worktrees (ADR 0028) end to end, against a real Git repository prepared by the shell.
+        const wsId = w.id;
+        const A = (await agentApi.saveCustom({ name: "WT Agent", executable: `${cfg.workspace}/mock-agent`, args: ["--wt"], env: [] })).find((a) => a.name === "WT Agent")!;
+        await st().refreshAgents();
+        const out: Record<string, unknown> = {};
+        const attempt = async (f: () => Promise<unknown>) => f().then(() => "ok", (e) => String(e));
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const paneText = (pane: string) => (dumpDevTerminals()[pane] ?? []).join("\n");
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(100);
+          return cond();
+        };
+        out.support = await worktreeApi.support(wsId);
+        const auth = await agentApi.authorize(wsId, A.id, true);
+        out.requestClasses = auth.kind === "required" ? auth.requests.map((r) => r.class) : [];
+        out.worktreeReview = auth.kind === "required" ? auth.requests.find((r) => r.class === "create_worktree")?.display : null;
+
+        st().launchAgent(A.id, { worktree: true }); // nothing approved yet: must be refused and create nothing
+        await sleep(2500);
+        out.unapproved = { ...st().paneState[agentPanes()[0]] };
+        out.worktreesAfterRefusal = (await worktreeApi.list(wsId)).length;
+
+        if (auth.kind === "required") {
+          for (const r of auth.requests) await approvalApi.decide(r.id, { decision: "allow", scope: r.class === "launch_agent" ? "workspace" : "once" });
+        }
+        st().launchAgent(A.id, { worktree: true });
+        await waitFor(() => agentPanes().length === 2 && st().paneState[agentPanes()[1]]?.kind === "running", 20000);
+        const apane = agentPanes()[1];
+        out.agent = { ...st().paneState[apane] };
+        await sleep(800);
+        const made = await worktreeApi.list(wsId);
+        out.created = made.map((m) => ({ branch: m.branch, path: m.path, exists: m.exists }));
+        out.branchBadge = (st().paneKinds[apane] as { branch?: string }).branch ?? null;
+        out.sidebarBadge = document.querySelector("[data-worktree-branch]")?.textContent ?? null;
+        const wt = made[0];
+
+        // A terminal inside the worktree (the backend resolves the folder). Leave an uncommitted file behind.
+        const shellPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "shell").map(([id]) => id);
+        st().newWorktreeTab("wt-shell", wt.id);
+        await waitFor(() => shellPanes().length >= 1 && st().paneState[shellPanes()[shellPanes().length - 1]]?.kind === "running", 15000);
+        const sh1 = shellPanes()[shellPanes().length - 1];
+        await sleep(600);
+        await type(sh1, "pwd; touch dirty.txt; exit\r");
+        await waitFor(() => st().paneState[sh1]?.kind === "exited" || !(sh1 in st().paneState), 10000);
+        out.shellPwd = paneText(sh1).split("\n").filter((l) => l.startsWith("/"))[0] ?? paneText(sh1).slice(-200);
+
+        out.removeWhileAgentRuns = await attempt(() => worktreeApi.reviewRemove(wt.id)); // an agent is still in it
+        await sessionApi.close(sessionRegistry.get(apane)!);
+        await sleep(1500);
+        out.removeWhenDirty = await attempt(() => worktreeApi.reviewRemove(wt.id)); // uncommitted file
+
+        st().newWorktreeTab("wt-shell2", wt.id);
+        await waitFor(() => shellPanes().length >= 2 && st().paneState[shellPanes()[shellPanes().length - 1]]?.kind === "running", 15000);
+        const sh2 = shellPanes()[shellPanes().length - 1];
+        await sleep(600);
+        await type(sh2, "rm dirty.txt; exit\r");
+        await waitFor(() => st().paneState[sh2]?.kind === "exited" || !(sh2 in st().paneState), 10000);
+        await sleep(800);
+
+        const review = await worktreeApi.reviewRemove(wt.id).catch((e) => String(e));
+        out.removeReview = typeof review === "string" ? review : review.display;
+        if (typeof review !== "string") {
+          out.removeWithoutApproval = await attempt(() => worktreeApi.remove(wt.id)); // must need the approval first
+          await approvalApi.decide(review.id, { decision: "allow", scope: "once" });
+          out.removed = await attempt(() => worktreeApi.remove(wt.id));
+        }
+        out.listAfter = (await worktreeApi.list(wsId)).length;
+        out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
+        await report({ stage: "worktree", out });
+        return;
+      }
+      if (visual === "memory") {
+        // Project memory (ADR 0031) end to end through the Memory view.
+        const out: Record<string, unknown> = {};
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(120);
+          return cond();
+        };
+        const setValue = (el: HTMLElement, v: string) => {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, v);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        const click = (label: string) => all("button").find((b) => b.textContent === label)?.click();
+        const addNote = async (title: string, body: string) => {
+          q("[data-memory-new]")!.click();
+          await waitFor(() => !!q("[data-memory-editor]"));
+          setValue(q("[aria-label='Note title']")!, title);
+          setValue(q("[aria-label='Note text']")!, body);
+          await sleep(200);
+          q("[data-memory-save]")!.click();
+          await sleep(900);
+        };
+        st().setView("memory");
+        await sleep(900);
+        out.offText = q("[data-memory-off]")?.textContent ?? null;
+        out.saveWhileOff = await memoryApi.save(w.id, null, "t", "b").then(() => "saved", (e) => String(e));
+        (q("[data-memory-toggle]") as HTMLInputElement).click();
+        await waitFor(() => !!q("[data-memory-new]"));
+        await addNote("Database choice", "We use SQLite with FTS5 for search.");
+        await addNote("Naming", "Crates are named naurix-*.");
+        await addNote("Oneliner note", "");
+        out.afterThree = all("[data-note]").length;
+        // A secret is refused, names the line and kind, and is not stored.
+        const secret = "AKIAIOSFODNN7EXAMPLE";
+        await addNote("Deploy", `first line\naws ${secret}`);
+        out.secretError = q("[data-memory-error]")?.textContent ?? null;
+        out.secretEchoed = (q("[data-memory-error]")?.textContent ?? "").includes(secret);
+        click("Cancel");
+        await sleep(400);
+        out.countAfterSecret = (await memoryApi.status(w.id)).count;
+        // Search.
+        setValue(q("[aria-label='Search notes']")!, "fts");
+        await sleep(900);
+        out.searchFts = all("[data-note]").map((e) => e.textContent?.slice(0, 20));
+        setValue(q("[aria-label='Search notes']")!, "zzzz");
+        await sleep(900);
+        out.searchNone = all("[data-note]").length;
+        setValue(q("[aria-label='Search notes']")!, "");
+        await sleep(600);
+
+        // Insert: a running agent pane receives the text without Enter; a shell pane is refused.
+        const cat = (await agentApi.saveCustom({ name: "Cat agent", executable: "/bin/sh", args: ["-c", "cat"], env: [] })).find((a) => a.name === "Cat agent")!;
+        await st().refreshAgents();
+        const r = await agentApi.authorize(w.id, cat.id);
+        if (r.kind === "required") for (const x of r.requests) await approvalApi.decide(x.id, { decision: "allow", scope: "workspace" });
+        st().launchAgent(cat.id);
+        const agentPane = () => Object.entries(st().paneKinds).find(([, k]) => k.type === "agent")?.[0];
+        await waitFor(() => !!agentPane() && st().paneState[agentPane()!]?.kind === "running", 15000);
+        await sleep(800);
+        st().setView("memory");
+        await sleep(600);
+        // A note with several lines is refused for a program without bracketed paste (cat); a one-line note goes in.
+        const insertFor = (title: string) => (all("[data-note]").find((e) => e.textContent?.startsWith(title))?.querySelector("button") as HTMLElement | undefined)?.click();
+        insertFor("Naming");
+        await sleep(500);
+        out.multiLineRefusal = q("[data-memory-error]")?.textContent ?? null;
+        out.viewAfterRefusal = st().view;
+        insertFor("Oneliner note");
+        await sleep(1200);
+        const buf = () => (dumpDevTerminals()[agentPane()!] ?? []).join("\n");
+        out.viewAfterInsert = st().view;
+        out.agentBufferHasNote = buf().includes("Oneliner note");
+        out.agentBufferHasEnterEffect = buf().split("\n").filter((l) => l.includes("Oneliner note")).length;
+        out.agentBuffer = buf().slice(-160);
+        st().newTab(); // a plain shell becomes the active pane
+        await sleep(1800);
+        st().setView("memory");
+        await sleep(600);
+        insertFor("Oneliner note");
+        await sleep(500);
+        out.shellRefusal = q("[data-memory-error]")?.textContent ?? null;
+
+        // Turning it off hides the notes but keeps them; delete works.
+        (q("[data-memory-toggle]") as HTMLInputElement).click();
+        await sleep(900);
+        out.offAgain = q("[data-memory-off]")?.textContent ?? null;
+        out.noteRowsWhileOff = all("[data-note]").length;
+        out.statusOff = await memoryApi.status(w.id);
+        await report({ stage: "memory", out });
+        return;
+      }
+      if (visual === "workflow-graph") {
+        // The run graph (ADR 0030): actions by clicking nodes, keyboard reachability, and the light theme.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const hang = await mk("Hang", "sleep 300");
+        const ok = await mk("Quick ok", "exit 0");
+        await st().refreshAgents();
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        const approveAndRun = async (name: string) => {
+          const flow = (await workflowApi.list(w.id)).find((x) => x.name === name)!;
+          const first = await workflowApi.run(flow.id);
+          if (first.kind === "required") await approvalApi.decide(first.request.id, { decision: "allow", scope: "once" });
+          return workflowApi.run(flow.id);
+        };
+        const node = (name: string) => all("[data-graph-step]").find((e) => e.textContent?.startsWith(name));
+        const nodeButton = (name: string, label: string) => [...(node(name)?.querySelectorAll("button") ?? [])].find((b) => b.textContent === label) as HTMLElement | undefined;
+        const labels = () => Object.fromEntries(all("[data-graph-step]").map((e) => [e.querySelector(".truncate")?.textContent ?? "?", e.getAttribute("data-graph-step")]));
+
+        // Run 1: a (never exits) -> b -> c. Skip b from the graph, then Mark done a from the graph.
+        await workflowApi.save(w.id, null, "Manual", [{ name: "a", agentId: hang.id, dependsOn: [] }, { name: "b", agentId: ok.id, dependsOn: [0] }, { name: "c", agentId: ok.id, dependsOn: [1] }]);
+        st().setView("workflows");
+        await sleep(600);
+        await approveAndRun("Manual");
+        st().bumpRuns();
+        await waitFor(() => !!node("a") && labels().a === "running");
+        out.start = labels();
+        out.skipOnRunningOffered = !!nodeButton("a", "Skip");
+        nodeButton("b", "Skip")?.click();
+        await waitFor(() => labels().b === "skipped");
+        out.afterSkip = labels();
+        await waitFor(() => labels().c === "succeeded", 10000);
+        out.cStartedWhileAStillRuns = { a: labels().a, c: labels().c };
+        nodeButton("a", "Mark done")?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "succeeded", 10000);
+        out.afterMarkDone = { labels: labels(), run: all("[data-run-state]")[0]?.textContent };
+        const aSession = (await sessionApi.list()).filter((x) => x.running).map((x) => x.id);
+        out.agentStillRunning = aSession.length;
+
+        // Run 2: x (never exits) -> y. Cancel the run from its panel.
+        await workflowApi.save(w.id, null, "Cancelable", [{ name: "x", agentId: hang.id, dependsOn: [] }, { name: "y", agentId: ok.id, dependsOn: [0] }]);
+        st().bumpRuns();
+        await sleep(600);
+        await approveAndRun("Cancelable");
+        st().bumpRuns();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "running");
+        await sleep(800);
+        const cancel = all("button").find((b) => b.textContent === "Cancel run");
+        out.cancelOffered = !!cancel;
+        cancel?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "cancelled", 10000);
+        out.afterCancel = { run: all("[data-run-state]")[0]?.textContent, labels: labels() };
+        out.stillRunningAfterCancel = (await sessionApi.list()).filter((x) => x.running).length;
+
+        // Keyboard: what a Tab key can reach.
+        const n0 = all(".react-flow__node")[0];
+        out.keyboard = {
+          nodeTabindex: n0?.getAttribute("tabindex") ?? null,
+          nodeRole: n0?.getAttribute("role") ?? null,
+          nodeAriaLabel: n0?.getAttribute("aria-label") ?? null,
+          edgeLabel: all(".react-flow__edge")[0]?.getAttribute("aria-label") ?? null,
+          buttonsInNodes: all("[data-graph-step] button").map((b) => b.tabIndex),
+          graphAriaLabel: q(".react-flow")?.getAttribute("aria-label") ?? null,
+        };
+        const firstBtn = all("[data-graph-step] button")[0];
+        firstBtn?.focus();
+        out.focusMovesToNodeButton = document.activeElement === firstBtn;
+
+        // Light theme: the class and the contrast of the label text against the card.
+        await st().updateSettings((x) => ({ ...x, appearance: { ...x.appearance, mode: "light" } }));
+        await sleep(900);
+        const lum = (c: string) => {
+          const m = c.match(/[\d.]+/g)!.map(Number);
+          const f = (v: number) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+          return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+        };
+        const ratio = (a: string, b: string) => {
+          const [x, y] = [lum(a), lum(b)].sort((p, r) => r - p);
+          return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10;
+        };
+        const cards = all("[data-graph-step]");
+        out.light = {
+          flowClass: q(".react-flow")?.className.match(/\b(dark|light)\b/)?.[1] ?? null,
+          contrast: cards.slice(0, 4).map((c) => {
+            const label = c.querySelector("[data-graph-label]") as HTMLElement;
+            const name = c.querySelector(".truncate") as HTMLElement;
+            const bg = getComputedStyle(c).backgroundColor;
+            return { state: c.getAttribute("data-graph-step"), label: ratio(getComputedStyle(label).color, bg), name: ratio(getComputedStyle(name).color, bg) };
+          }),
+          edgeStroke: getComputedStyle(q(".react-flow__edge-path")!).stroke,
+        };
+        // Every tone the graph uses, on the card background, in this theme.
+        const probe = document.createElement("div");
+        probe.className = "rounded-lg border bg-raised px-2.5 py-2";
+        document.body.appendChild(probe);
+        const toneContrast: Record<string, number> = {};
+        for (const [tone, cls] of Object.entries({ ok: "text-teal", bad: "text-danger", warn: "text-warning", idle: "text-faint", live: "text-cloud" })) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = "x";
+          probe.appendChild(span);
+          toneContrast[tone] = ratio(getComputedStyle(span).color, getComputedStyle(probe).backgroundColor);
+        }
+        probe.remove();
+        out.toneContrastLight = toneContrast;
+        await st().updateSettings((x) => ({ ...x, appearance: { ...x.appearance, mode: "dark" } }));
+        await sleep(700);
+        const probe2 = document.createElement("div");
+        probe2.className = "bg-raised";
+        document.body.appendChild(probe2);
+        const dark: Record<string, number> = {};
+        for (const [tone, cls] of Object.entries({ ok: "text-teal", bad: "text-danger", warn: "text-warning", idle: "text-faint", live: "text-cloud" })) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = "x";
+          probe2.appendChild(span);
+          dark[tone] = ratio(getComputedStyle(span).color, getComputedStyle(probe2).backgroundColor);
+        }
+        probe2.remove();
+        out.toneContrastDark = dark;
+        for (const x of (await sessionApi.list()).filter((s) => s.running)) await sessionApi.close(x.id);
+        await report({ stage: "workflow-graph", out });
+        return;
+      }
+      if (visual === "workflow-ui") {
+        // The Workflows editor driven the way a person would: new workflow, steps, dependencies, save, run, approve.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const agents = { build: await mk("Demo build", "sleep 3; echo building; exit 0"), test: await mk("Demo test", "sleep 2; exit 0"), lint: await mk("Demo lint", "exit 3"), ship: await mk("Demo ship", "exit 0") };
+        await st().refreshAgents();
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        const setValue = (el: HTMLElement, v: string) => {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, v);
+          el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+        };
+        const click = (label: string) => all("button").find((b) => b.textContent === label)?.click();
+        st().setView("workflows");
+        await sleep(800);
+        click("New workflow");
+        await waitFor(() => !!q("[data-workflow-editor]"));
+        setValue(q("[aria-label='Workflow name']")!, "Build then check");
+        for (let i = 0; i < 3; i++) {
+          click("Add step");
+          await sleep(200);
+        }
+        out.stepEditors = all("[data-step-editor]").length;
+        const plan: [string, string, number[]][] = [["build", agents.build.id, []], ["test", agents.test.id, [0]], ["lint", agents.lint.id, [0]], ["ship", agents.ship.id, [1, 2]]];
+        for (let i = 0; i < plan.length; i++) {
+          setValue(q(`[aria-label='Step ${i + 1} name']`)!, plan[i][0]);
+          setValue(q(`[aria-label='Step ${i + 1} agent']`)!, plan[i][1]);
+          await sleep(150);
+          for (const dep of plan[i][2]) {
+            const boxes = all("[data-step-editor]")[i].querySelectorAll("input[type=checkbox]");
+            (boxes[dep] as HTMLInputElement).click();
+            await sleep(120);
+          }
+        }
+        out.editorTexts = all("[data-step-editor]").map((e) => e.textContent?.slice(0, 80));
+        click("Save");
+        await sleep(1200);
+        out.errorAfterSave = q("[role=alert]")?.textContent ?? null;
+        out.listed = all("[data-workflow]").map((e) => e.textContent);
+        out.runButtonDisabled = (q("[data-workflow-run]") as HTMLButtonElement | null)?.disabled ?? null;
+        q("[data-workflow-run]")?.click();
+        await waitFor(() => !!q("[data-run-review]"), 8000);
+        out.review = q("[data-run-review] pre")?.textContent?.slice(0, 500) ?? null;
+        out.errorAtRun = q("[role=alert]")?.textContent ?? null;
+        q("[data-run-approve]")?.click();
+        const seen: string[] = [];
+        await waitFor(() => {
+          const snap = all("[data-graph-step]").map((e) => `${e.querySelector("[data-graph-label]")?.textContent}`).join(" | ");
+          if (seen[seen.length - 1] !== snap) seen.push(snap);
+          return ["failed", "succeeded"].includes(q("[data-run-state]")?.textContent ?? "");
+        }, 30000);
+        out.progress = seen;
+        out.finalState = q("[data-run-state]")?.textContent ?? null;
+        out.graph = { nodes: all(".react-flow__node").length, edges: all(".react-flow__edge").length };
+        out.errorAtEnd = q("[role=alert]")?.textContent ?? null;
+        // A second run: the first one is now collapsed. Opening it must still show its graph inside the canvas.
+        q("[data-workflow-run]")?.click();
+        await waitFor(() => !!q("[data-run-review]"), 8000);
+        q("[data-run-approve]")?.click();
+        await waitFor(() => all("[data-run-state]").length === 2 && all("[data-run-state]").every((e) => e.textContent !== "running"), 30000);
+        const runs = all("details[data-run]");
+        out.detailsOpen = runs.map((d) => (d as HTMLDetailsElement).open);
+        const older = runs[runs.length - 1];
+        out.olderNodesBeforeOpen = older.querySelectorAll(".react-flow__node").length;
+        out.graphsMountedWhileOneRunCollapsed = all(".react-flow__renderer, [data-run-graph]").length;
+        (older.querySelector("summary") as HTMLElement).click();
+        await sleep(1500);
+        const box = (e: Element) => e.getBoundingClientRect();
+        const canvas = older.querySelector("[data-run-graph]");
+        const cb = canvas ? box(canvas) : null;
+        const inside = all("details[data-run]").length ? [...older.querySelectorAll(".react-flow__node")].filter((n) => {
+          const b = box(n);
+          return !!cb && b.width > 0 && b.left >= cb.left - 1 && b.right <= cb.right + 1 && b.top >= cb.top - 1 && b.bottom <= cb.bottom + 1;
+        }).length : 0;
+        out.olderGraph = { canvas: cb ? [Math.round(cb.width), Math.round(cb.height)] : null, nodes: older.querySelectorAll(".react-flow__node").length, nodesFullyInsideCanvas: inside, viewport: (older.querySelector(".react-flow__viewport") as HTMLElement | null)?.style.transform ?? null };
+        await report({ stage: "workflow-ui", out });
+        return;
+      }
+      if (visual === "workflow") {
+        // Workflows (ADR 0030) end to end through the real Workflows view. Agents are custom `sh -c` commands.
+        const out: Record<string, unknown> = {};
+        const mk = async (name: string, script: string) => (await agentApi.saveCustom({ name, executable: "/bin/sh", args: ["-c", script], env: [] })).find((a) => a.name === name)!;
+        const slow = await mk("Slow ok", "sleep 2; exit 0");
+        const ok = await mk("Quick ok", "echo PLANTED-OUTPUT-MARKER; exit 0");
+        const bad = await mk("Quick fail", "exit 3");
+        const hang = await mk("Hang", "sleep 300");
+        await st().refreshAgents();
+        await workflowApi.save(w.id, null, "Build then check", [
+          { name: "build", agentId: slow.id, dependsOn: [] },
+          { name: "unit", agentId: ok.id, dependsOn: [0] },
+          { name: "lint", agentId: bad.id, dependsOn: [0] },
+          { name: "ship", agentId: ok.id, dependsOn: [1, 2] },
+        ]);
+        out.cycleRefused = await workflowApi.save(w.id, null, "cycle", [{ name: "a", agentId: ok.id, dependsOn: [] }, { name: "b", agentId: ok.id, dependsOn: [0] }].map((x, i) => (i === 0 ? { ...x, dependsOn: [1] } : x))).then(() => "saved", (e) => String(e));
+        st().setView("workflows");
+        await sleep(800);
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const all = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        out.listed = all("[data-workflow]").map((e) => e.textContent);
+        out.activeBefore = (await approvalApi.list()).active.length;
+        q("[data-workflow-run]")!.click();
+        await waitFor(() => !!q("[data-run-review]"));
+        out.review = q("[data-run-review] pre")?.textContent ?? null;
+        out.sessionsBeforeApproval = (await sessionApi.list()).length;
+        q("[data-run-approve]")!.click();
+        const seen: string[] = [];
+        await waitFor(() => {
+          const snap = all("[data-graph-step]").map((e) => `${e.querySelector("[data-graph-label]")?.textContent}`).join(" | ");
+          if (seen[seen.length - 1] !== snap) seen.push(snap);
+          return q("[data-run-state]")?.textContent === "failed" || q("[data-run-state]")?.textContent === "succeeded";
+        }, 30000);
+        out.progress = seen;
+        out.graph = { nodes: all(".react-flow__node").length, edges: all(".react-flow__edge").length, positions: all(".react-flow__node").map((n) => n.style.transform) };
+        out.graphStates = all("[data-graph-step]").map((e) => e.getAttribute("data-graph-step"));
+        // The list stays available as the alternative view.
+        q("[data-run-mode='list']")!.click();
+        await sleep(500);
+        out.listStepsAfterToggle = all("[data-run-step]").length;
+        out.graphGoneInList = all(".react-flow__node").length;
+        q("[data-run-mode='graph']")!.click();
+        await sleep(800);
+        out.firstRunState = q("[data-run-state]")?.textContent ?? null;
+        out.grantsAfterRun = (await approvalApi.list()).active.length;
+        out.history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.class}`);
+
+        // Second workflow: an interactive-style step that never exits, finished by the user.
+        const wf2 = await workflowApi.save(w.id, null, "Manual finish", [{ name: "agent", agentId: hang.id, dependsOn: [] }, { name: "after", agentId: ok.id, dependsOn: [0] }]);
+        await st().refreshAgents();
+        const start2 = await workflowApi.run(wf2.id);
+        if (start2.kind === "required") await approvalApi.decide(start2.request.id, { decision: "allow", scope: "once" });
+        const started2 = await workflowApi.run(wf2.id);
+        await sleep(1200);
+        st().bumpRuns();
+        await sleep(600);
+        const hangSid = started2.kind === "started" ? Object.values(started2.run.sessions)[0] : undefined;
+        out.hangSession = hangSid ?? null;
+        out.markDoneButtons = all("button").filter((b) => b.textContent === "Mark done").length;
+        out.openTerminalButtons = all("button").filter((b) => b.textContent === "Open terminal").length;
+        const panesBefore = Object.keys(st().paneKinds).length;
+        all("button").find((b) => b.textContent === "Open terminal")?.click();
+        await sleep(1500);
+        out.openedPane = Object.keys(st().paneKinds).length - panesBefore;
+        st().setView("workflows");
+        await sleep(800);
+        all("button").find((b) => b.textContent === "Mark done")?.click();
+        await waitFor(() => all("[data-run-state]")[0]?.textContent === "succeeded", 15000);
+        out.secondRunState = all("[data-run-state]")[0]?.textContent ?? null;
+        out.hangStillRunning = hangSid !== undefined ? (await sessionApi.list()).some((x) => x.id === hangSid && x.running) : null;
+        if (hangSid !== undefined) await sessionApi.close(hangSid);
+        out.grantsAtEnd = (await approvalApi.list()).active.length;
+        await report({ stage: "workflow", out });
+        return;
+      }
+      if (visual === "status") {
+        // Status signals (ADR 0029) end to end. `claude-code` is pointed at scripts/mock-status-agent, which runs
+        // the hooks it was given the way Claude Code would. Off first (no hooks, plain Running), then opted in.
+        await agentApi.setPath("claude-code", `${cfg.workspace}/mock-status-agent`);
+        await st().refreshAgents();
+        const out: Record<string, unknown> = {};
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const last = (sel: string) => [...document.querySelectorAll(sel)].pop();
+        const label = () => last("[data-agent-status]")?.textContent ?? null;
+        const approve = async (wsId: string) => {
+          const r = await agentApi.authorize(wsId, "claude-code");
+          if (r.kind === "required") {
+            for (const q of r.requests) await approvalApi.decide(q.id, { decision: "allow", scope: "workspace" });
+          }
+          return r.kind === "required" ? r.requests[0].display : null;
+        };
+        out.offSettings = (await settingsApi.get()).agents;
+        out.reviewOff = await approve(w.id);
+        st().launchAgent("claude-code");
+        await sleep(2500);
+        out.offLabel = label();
+        out.offBuffer = (dumpDevTerminals()[agentPanes()[0]] ?? []).join("\n").slice(0, 200);
+        await sessionApi.close(sessionRegistry.get(agentPanes()[0])!);
+        await sleep(1000);
+
+        await st().updateSettings((x) => ({ ...x, agents: { ...x.agents, statusSignals: ["claude-code"] } }));
+        out.onSettings = (await settingsApi.get()).agents;
+        const again = await agentApi.authorize(w.id, "claude-code");
+        out.askedAgainAfterTurningOn = again.kind === "required";
+        out.reviewOn = await approve(w.id);
+        const evs: string[] = [];
+        await listen<{ type: string; kind?: string }>("session://lifecycle", (e) => evs.push(`${e.payload.type}:${e.payload.kind ?? ""}`));
+        st().launchAgent("claude-code");
+        const seen: string[] = [];
+        const end = Date.now() + 25000;
+        while (Date.now() < end) {
+          const l = label();
+          if (l && seen[seen.length - 1] !== l) seen.push(l);
+          if (l === "Turn finished") break;
+          await sleep(150);
+        }
+        out.labelsSeen = seen;
+        out.eventsSeen = evs;
+        out.storeStatus = st().sessionStatus;
+        const pane = agentPanes()[agentPanes().length - 1];
+        out.detail = last("[data-agent-detail]")?.getAttribute("title") ?? null;
+        out.buffer = (dumpDevTerminals()[pane] ?? []).join("\n").slice(0, 200);
+        // A reload must keep the status (Core owns it), and closing must clear it.
+        const sid = sessionRegistry.get(pane)!;
+        out.listedStatus = (await sessionApi.list()).find((x) => x.id === sid)?.status ?? null;
+        await sessionApi.close(sid);
+        await sleep(1500);
+        out.afterClose = (await sessionApi.list()).find((x) => x.id === sid)?.status ?? "closed";
+        await report({ stage: "status", out });
+        return;
+      }
+      if (visual === "limit") {
+        // The agent limit (ADR 0027): one slot. Agent B is approved ONCE; while A holds the slot B must be
+        // refused WITHOUT spending that approval, and must start afterwards using the same approval.
+        await st().updateSettings((x) => ({ ...x, agents: { ...x.agents, maxConcurrent: 1 } }));
+        const mk = async (name: string, args: string[]) => (await agentApi.saveCustom({ name, executable: `${cfg.workspace}/mock-agent`, args, env: [] })).find((a) => a.name === name)!;
+        const A = await mk("Agent A", ["--a"]);
+        const B = await mk("Agent B", ["--b"]);
+        await st().refreshAgents();
+        const approve = async (id: string, scope: "once" | "workspace") => {
+          const r = await agentApi.authorize(w.id, id);
+          if (r.kind === "required") await approvalApi.decide(r.requests[0].id, { decision: "allow", scope });
+        };
+        const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
+        const grants = async () => (await approvalApi.list()).active.map((g) => `${g.scope}:${g.summary.split(" at ")[0]}`);
+        await approve(A.id, "workspace");
+        await approve(B.id, "once");
+        st().launchAgent(A.id);
+        await sleep(2500);
+        const [pa] = agentPanes();
+        st().launchAgent(B.id);
+        await sleep(2500);
+        const pb = agentPanes()[1];
+        const refused = { ...st().paneState[pb] };
+        const grantsAfterRefusal = await grants(); // B's once grant must still be there
+        st().newTab(); // a plain terminal is never limited
+        await sleep(2000);
+        const sp = activeSpace(st());
+        const terminal = { ...st().paneState[sp!.tabs.find((t) => t.id === sp!.activeTabId)!.activePaneId] };
+        await sessionApi.close(sessionRegistry.get(pa)!); // free the slot
+        await sleep(1500);
+        st().restartPane(pb); // Launch again, as the user would
+        await sleep(2500);
+        const started = { ...st().paneState[pb] };
+        const history = (await approvalApi.list()).history.map((g) => `${g.state}:${g.scope}:${g.summary.split(" at ")[0]}`);
+        await report({ stage: "limit", refused, grantsAfterRefusal, terminal, started, history, grantsNow: await grants() });
+        return;
+      }
+      if (visual === "reload") {
+        // Sessions outlive a page reload (ADR 0026). Phase 1 starts a shell, prints a marker and reloads the
+        // page. Phase 2 (the reloaded page) must find the SAME session, see the marker replayed, and still be able to use it.
+        const waitFor = async (cond: () => boolean, ms = 10000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(100);
+          return cond();
+        };
+        const ws = w.id;
+        const pane = () => {
+          const sp = st().spaces[ws];
+          return sp?.tabs.find((t) => t.id === sp.activeTabId)?.activePaneId;
+        };
+        const text = () => (pane() ? (dumpDevTerminals()[pane()!] ?? []).join("\n") : "");
+        if ((st().spaces[ws]?.tabs.length ?? 0) === 0) {
+          st().newTab();
+          await waitFor(() => st().paneState[pane() ?? ""]?.kind === "running");
+          const sid = sessionRegistry.get(pane()!);
+          sessionStorage.setItem("smokeSid", String(sid));
+          await type(pane()!, "echo MARK_$((40+2))\r");
+          const sawMarker = await waitFor(() => text().includes("MARK_42"));
+          await sleep(500); // let the prompt settle so the snapshot is what the user saw
+          sessionStorage.setItem("smokeLines", JSON.stringify(text().split("\n")));
+          await report({ stage: "before-reload", sid, sawMarker });
+          await sleep(300);
+          location.reload();
+          return;
+        }
+        const pa = pane()!;
+        const replayed = await waitFor(() => text().includes("MARK_42"));
+        await sleep(500); // replay arrives in chunks; let it finish before comparing
+        const replayedLines = text().split("\n");
+        const before = JSON.parse(sessionStorage.getItem("smokeLines") ?? "[]") as string[];
+        const sidAfter = sessionRegistry.get(pa);
+        // A marker unique to this reload, so "the shell still answers" cannot be satisfied by replayed text.
+        const reloads = Number(sessionStorage.getItem("smokeN") ?? "0") + 1;
+        sessionStorage.setItem("smokeN", String(reloads));
+        await type(pa, `echo ALIVE_$((50+${reloads}))\r`);
+        const alive = await waitFor(() => text().includes(`ALIVE_${50 + reloads}`));
+        sessionStorage.setItem("smokeLines", JSON.stringify(text().split("\n")));
+        const results = JSON.parse(sessionStorage.getItem("smokeResults") ?? "[]") as unknown[];
+        results.push({ reload: reloads, sameSession: String(sidAfter) === sessionStorage.getItem("smokeSid"), replayMatches: JSON.stringify(replayedLines) === JSON.stringify(before), alive });
+        sessionStorage.setItem("smokeResults", JSON.stringify(results));
+        await report({ stage: "after-reload", results, reloads, sidBefore: sessionStorage.getItem("smokeSid"), sidAfter, tabs: st().spaces[ws].tabs.length, replayed, replayMatchesWhatWasOnScreen: JSON.stringify(replayedLines) === JSON.stringify(before), before, replayedLines, alive, state: st().paneState[pa]?.kind, lines: text().split("\n") });
+        if (reloads < 2) {
+          await sleep(300);
+          location.reload(); // a second reload must work just as well
+        }
+        return;
+      }
       if (visual === "mcp") {
         // Whole MCP flow through the real UI: add, approve, store a secret in the Keychain, test, sync, undo.
         const root = cfg.workspace!;
@@ -530,11 +1138,14 @@ export async function runSmoke() {
     await st().refreshAgents();
     const agentPanes = () => Object.entries(st().paneKinds).filter(([, k]) => k.type === "agent").map(([id]) => id);
 
-    st().launchAgent(mock.id, false); // not reviewed: the backend must refuse
+    st().launchAgent(mock.id); // no approval yet: the backend must refuse and start nothing
     await sleep(2500);
     const unreviewed = { ...st().paneState[agentPanes()[0]] };
 
-    st().launchAgent(mock.id, true);
+    // Approve once through the real gate (the backend builds the request), then launch.
+    const auth = await agentApi.authorize(st().activeWorkspaceId!, mock.id);
+    if (auth.kind === "required") await approvalApi.decide(auth.requests[0].id, { decision: "allow", scope: "once" });
+    st().launchAgent(mock.id);
     await sleep(2500);
     const running = agentPanes()[1];
     await type(running, "hello\r");
@@ -544,7 +1155,7 @@ export async function runSmoke() {
     await sleep(2000);
     const afterClean = { state: { ...st().paneState[running] }, stillThere: agentPanes().includes(running) };
 
-    st().launchAgent("codex", true); // not installed on this machine
+    st().launchAgent("codex"); // not installed on this machine
     await sleep(2500);
     const codexPane = agentPanes()[2];
     const notInstalled = { ...st().paneState[codexPane] };

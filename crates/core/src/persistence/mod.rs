@@ -4,7 +4,7 @@
 mod time;
 mod workspace;
 
-pub use time::iso8601_utc_now;
+pub use time::{iso8601_utc_in, iso8601_utc_now};
 pub use workspace::{validate_name, validate_root};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -157,6 +157,110 @@ const MIGRATIONS: &[&str] = &[
        created_at TEXT NOT NULL,
        PRIMARY KEY (skill_id, link_path)
      );",
+    // 4: approval gate (ADR 0027). Metadata only: the summary holds an agent name and program path, never
+    // arguments, environment values, prompts or output. App-scoped grants have no workspace and outlive it.
+    "CREATE TABLE approvals (
+       id TEXT PRIMARY KEY,
+       class TEXT NOT NULL,
+       scope TEXT NOT NULL,
+       scope_ref TEXT,
+       fingerprint TEXT NOT NULL,
+       summary TEXT NOT NULL,
+       workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+       state TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       last_used_at TEXT,
+       expires_at TEXT,
+       ended_at TEXT
+     );
+     CREATE INDEX approvals_lookup ON approvals(class, fingerprint, state);
+     ALTER TABLE sessions ADD COLUMN approval_id TEXT;",
+    // 5: worktrees Naurix created for agents (ADR 0028). Metadata only. Removing a workspace never deletes
+    // project files, so it does not delete worktree folders either: the row stays with the workspace cleared.
+    "CREATE TABLE worktrees (
+       id TEXT PRIMARY KEY,
+       workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+       repo_root TEXT NOT NULL,
+       path TEXT NOT NULL UNIQUE,
+       branch TEXT NOT NULL,
+       base_commit TEXT NOT NULL,
+       created_at TEXT NOT NULL
+     );
+     ALTER TABLE sessions ADD COLUMN worktree_id TEXT;",
+    // 6: workflows and runs (ADR 0030). Metadata only: ids, user-typed names, edges, states, times and a
+    // short fixed-vocabulary note. No prompts, arguments, paths or output. A run is a snapshot of its
+    // workflow; deleting the workflow keeps the run history.
+    "CREATE TABLE workflows (
+       id TEXT PRIMARY KEY,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       name TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     );
+     CREATE TABLE workflow_steps (
+       id TEXT PRIMARY KEY,
+       workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+       position INTEGER NOT NULL,
+       name TEXT NOT NULL,
+       agent_id TEXT NOT NULL
+     );
+     CREATE TABLE workflow_deps (
+       step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+       depends_on TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+       PRIMARY KEY (step_id, depends_on)
+     );
+     CREATE TABLE runs (
+       id TEXT PRIMARY KEY,
+       workflow_id TEXT REFERENCES workflows(id) ON DELETE SET NULL,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       name TEXT NOT NULL,
+       state TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       finished_at TEXT
+     );
+     CREATE INDEX runs_workspace ON runs(workspace_id, created_at);
+     CREATE TABLE run_steps (
+       id TEXT PRIMARY KEY,
+       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+       position INTEGER NOT NULL,
+       name TEXT NOT NULL,
+       agent_id TEXT NOT NULL,
+       state TEXT NOT NULL,
+       started_at TEXT,
+       finished_at TEXT,
+       exit_code INTEGER,
+       note TEXT
+     );
+     CREATE TABLE run_deps (
+       run_step_id TEXT NOT NULL REFERENCES run_steps(id) ON DELETE CASCADE,
+       depends_on TEXT NOT NULL REFERENCES run_steps(id) ON DELETE CASCADE,
+       PRIMARY KEY (run_step_id, depends_on)
+     );",
+    // 7: opt-in project memory (ADR 0031). Notes are text the user typed; nothing is captured. `rid` is a
+    // stable integer key for the full-text index (a TEXT key's implicit rowid can change on VACUUM). The
+    // triggers keep memory_fts in step, including when a workspace removal cascades to its notes.
+    "ALTER TABLE workspaces ADD COLUMN memory_enabled INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE memory_notes (
+       rid INTEGER PRIMARY KEY AUTOINCREMENT,
+       id TEXT NOT NULL UNIQUE,
+       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+       title TEXT NOT NULL,
+       body TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     );
+     CREATE INDEX memory_notes_workspace ON memory_notes(workspace_id, updated_at);
+     CREATE VIRTUAL TABLE memory_fts USING fts5(title, body, content='memory_notes', content_rowid='rid', tokenize='unicode61 remove_diacritics 2');
+     CREATE TRIGGER memory_ai AFTER INSERT ON memory_notes BEGIN
+       INSERT INTO memory_fts(rowid, title, body) VALUES (new.rid, new.title, new.body);
+     END;
+     CREATE TRIGGER memory_ad AFTER DELETE ON memory_notes BEGIN
+       INSERT INTO memory_fts(memory_fts, rowid, title, body) VALUES ('delete', old.rid, old.title, old.body);
+     END;
+     CREATE TRIGGER memory_au AFTER UPDATE ON memory_notes BEGIN
+       INSERT INTO memory_fts(memory_fts, rowid, title, body) VALUES ('delete', old.rid, old.title, old.body);
+       INSERT INTO memory_fts(rowid, title, body) VALUES (new.rid, new.title, new.body);
+     END;",
 ];
 
 pub struct Db {
@@ -185,6 +289,12 @@ impl Db {
     }
 
     pub(crate) fn c(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap()
+    }
+
+    /// Raw connection for integration tests that must inspect what is actually stored.
+    #[doc(hidden)]
+    pub fn c_for_test(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap()
     }
 
@@ -317,15 +427,25 @@ impl Db {
         kind: SessionKind,
         title: &str,
         adapter_id: Option<&str>,
+        approval_id: Option<&str>,
     ) -> Result<String, DbError> {
         let title = validate_name(title)?;
         let id = new_id();
         let now = iso8601_utc_now();
         self.c().execute(
-            "INSERT INTO sessions (id, workspace_id, kind, title, adapter_id, lifecycle, started_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6, ?6)",
-            params![id, workspace_id, kind.as_str(), title, adapter_id, now],
+            "INSERT INTO sessions (id, workspace_id, kind, title, adapter_id, lifecycle, started_at, created_at, updated_at, approval_id) VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6, ?6, ?7)",
+            params![id, workspace_id, kind.as_str(), title, adapter_id, now, approval_id],
         )?;
         Ok(id)
+    }
+
+    /// Record which Naurix-created worktree a session runs in (ADR 0028).
+    pub fn set_session_worktree(&self, session_id: &str, worktree_id: &str) -> Result<(), DbError> {
+        self.c().execute(
+            "UPDATE sessions SET worktree_id = ?1 WHERE id = ?2",
+            params![worktree_id, session_id],
+        )?;
+        Ok(())
     }
 
     pub fn finish_session(&self, id: &str, lifecycle: &str) -> Result<(), DbError> {

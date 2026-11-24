@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useStore } from "../../state/store";
 import { tildePath } from "../workspaces/path";
+import { worktreeApi, type ManagedWorktree } from "../worktrees/api";
+import { forgetMissing, startRemove } from "../worktrees/remove";
 import { branchLabel, gitApi, groupEntries, type Area, type DiffResult, type FileEntry, type RepoStatus, type Worktree } from "./api";
 
 const outline = "rounded-lg border border-line px-3 py-1 text-xs text-cloud hover:bg-raised disabled:opacity-40";
@@ -24,10 +26,14 @@ export function GitPanel() {
   const refresh = useStore((s) => s.refreshGit);
   const trustRepo = useStore((s) => s.trustRepo);
   const newRepoTab = useStore((s) => s.newRepoTab);
+  const newWorktreeTab = useStore((s) => s.newWorktreeTab);
   const [sel, setSel] = useState<Sel | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [trees, setTrees] = useState<Worktree[]>([]);
+  /** The ones Naurix created for agents, matched to the list above by folder. */
+  const [managed, setManaged] = useState<ManagedWorktree[]>([]);
+  const loadManaged = useCallback(() => (workspaceId ? worktreeApi.list(workspaceId).then(setManaged).catch(() => setManaged([])) : setManaged([])), [workspaceId]);
   const r = git.result?.state === "repo" ? (git.result as { state: "repo" } & RepoStatus) : null;
 
   // Reload the selected file's diff whenever the status is refreshed (or the selection changes).
@@ -48,7 +54,8 @@ export function GitPanel() {
   useEffect(() => {
     if (!workspaceId || !r) return setTrees([]);
     gitApi.worktrees(workspaceId).then(setTrees).catch(() => setTrees([]));
-  }, [workspaceId, r?.root, r?.head_oid]); // eslint-disable-line react-hooks/exhaustive-deps
+    void loadManaged();
+  }, [workspaceId, r?.root, r?.head_oid, loadManaged]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = r ? groupEntries(r.entries) : null;
 
@@ -126,7 +133,25 @@ export function GitPanel() {
               {trees.length > 1 && (
                 <section className="mt-6" data-git-section="Worktrees">
                   <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">Worktrees ({trees.length})</h3>
-                  <ul className="space-y-1 text-xs">{trees.map((t) => <li key={t.path} className="truncate font-mono text-muted" title={t.path}>{t.bare ? "(bare)" : t.branch ?? (t.detached ? "detached" : "?")} <span className="text-faint">{tildePath(t.path)}</span></li>)}</ul>
+                  <ul className="space-y-1 text-xs">
+                    {trees.map((t) => {
+                      const m = managed.find((x) => x.path === t.path);
+                      return (
+                        <li key={t.path} className="flex items-center gap-2" data-worktree-row={m ? "managed" : "other"}>
+                          <span className="min-w-0 flex-1 truncate font-mono text-muted" title={t.path}>{t.bare ? "(bare)" : t.branch ?? (t.detached ? "detached" : "?")} <span className="text-faint">{tildePath(t.path)}</span></span>
+                          {m && <span className="shrink-0 rounded bg-raised px-1 text-[10px] text-teal" title="Naurix created this worktree for an agent">created by Naurix</span>}
+                          {m && m.exists && <button className={outline} onClick={() => newWorktreeTab(m.branch.replace(/^naurix\//, ""), m.id)} title="Open a terminal in this worktree">Open terminal</button>}
+                          {m && m.exists && <button className={outline} disabled={m.inUse} onClick={() => startRemove(m, () => { void loadManaged(); void gitApi.worktrees(workspaceId!).then(setTrees).catch(() => {}); })} title={m.inUse ? "An agent or terminal is still running in it" : "Remove this worktree (the branch is kept)"}>Remove…</button>}
+                        </li>
+                      );
+                    })}
+                    {managed.filter((m) => !m.exists).map((m) => (
+                      <li key={m.id} className="flex items-center gap-2 text-faint" data-worktree-row="missing">
+                        <span className="min-w-0 flex-1 truncate font-mono" title={m.path}>{m.branch} (folder is gone)</span>
+                        <button className={outline} onClick={() => forgetMissing(m, () => void loadManaged())}>Forget</button>
+                      </li>
+                    ))}
+                  </ul>
                 </section>
               )}
             </div>

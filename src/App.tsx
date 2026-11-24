@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { isAgentSignalKind } from "./features/agents/status";
 import { DialogHost } from "./components/Dialogs";
 import { AgentLauncher } from "./features/agents/AgentLauncher";
 import { PaneTree } from "./features/layout/PaneTree";
@@ -11,6 +13,8 @@ import { branchLabel, dirtyCount } from "./features/git/api";
 import { McpManager } from "./features/mcp/McpManager";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SkillsManager } from "./features/skills/SkillsManager";
+import { WorkflowsView } from "./features/workflows/WorkflowsView";
+import { MemoryView } from "./features/memory/MemoryView";
 import { ContextMenu } from "./features/terminal/ContextMenu";
 import { Sidebar } from "./features/workspaces/Sidebar";
 import { SHORTCUTS, clipboardShortcut, matchShortcut, tabIndexShortcut } from "./shortcuts";
@@ -45,6 +49,33 @@ export default function App() {
     onChange();
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // What agents report about themselves (ADR 0029): a fixed word and a time, nothing else. The state is
+  // dropped when the process exits, so a stale report is never shown.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listen<{ type: string; session: number; kind?: string; at?: string }>("session://lifecycle", (e) => {
+      const p = e.payload;
+      if (p.type === "status" && p.kind && p.at && isAgentSignalKind(p.kind)) useStore.getState().setSessionStatus(p.session, { kind: p.kind, at: p.at });
+      else if (p.type === "exited") useStore.getState().setSessionStatus(p.session, null);
+    }).then((u) => (gone ? u() : (off = u)));
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
+
+  // A workflow run changed (ADR 0030): ids only; the Workflows view re-reads its runs.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listen("run://changed", () => useStore.getState().bumpRuns()).then((u) => (gone ? u() : (off = u)));
+    return () => {
+      gone = true;
+      off?.();
+    };
   }, []);
 
   // Git status is refreshed on events only (never on a timer): when the window regains focus.
@@ -134,8 +165,10 @@ function Main() {
   const showMcp = view === "mcp";
   const showSkills = view === "skills";
   const showGit = view === "git";
+  const showWorkflows = view === "workflows";
+  const showMemory = view === "memory";
   const showSettings = view === "settings";
-  const showHome = !showMcp && !showSkills && !showGit && !showSettings && (view === "home" || !space || space.tabs.length === 0);
+  const showHome = !showMcp && !showSkills && !showGit && !showWorkflows && !showMemory && !showSettings && (view === "home" || !space || space.tabs.length === 0);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
@@ -143,12 +176,14 @@ function Main() {
       <div className="relative min-h-0 flex-1 bg-terminal">
         {/* Every tab of every workspace stays mounted so terminals keep their buffers; hidden ones use display:none. */}
         {Object.entries(spaces).flatMap(([wsId, sp]) =>
-          sp.tabs.map((t) => <PaneTree key={t.id} wsId={wsId} tab={t} visible={!showHome && !showMcp && !showSkills && !showGit && !showSettings && wsId === activeId && t.id === sp.activeTabId} />),
+          sp.tabs.map((t) => <PaneTree key={t.id} wsId={wsId} tab={t} visible={!showHome && !showMcp && !showSkills && !showGit && !showWorkflows && !showMemory && !showSettings && wsId === activeId && t.id === sp.activeTabId} />),
         )}
         {showHome && <Home />}
         {showMcp && <McpManager />}
         {showSkills && <SkillsManager />}
         {showGit && <GitPanel />}
+        {showWorkflows && <WorkflowsView />}
+        {showMemory && <MemoryView />}
         {showSettings && <SettingsView />}
       </div>
     </main>

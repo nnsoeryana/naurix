@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../../state/store";
+import { approvalApi, scopeLabel, type ApprovalRequest, type ApprovalScope } from "../approvals/api";
+import { worktreeApi, type WorktreeSupport } from "../worktrees/api";
 import { agentApi, type AgentInfo, type CustomAgentInput } from "./api";
+import { extrasAreOnceOnly, ordered, requestTitle, splitRequests } from "./requests";
 import { Capabilities } from "./Capabilities";
 
-type Mode = { kind: "list" } | { kind: "review"; id: string } | { kind: "edit"; draft: Draft };
+/** `requests` is set when the backend asked for approval: the review then shows ITS text, not anything the UI built. */
+type Mode = { kind: "list" } | { kind: "review"; id: string; requests?: ApprovalRequest[] } | { kind: "edit"; draft: Draft };
 type Draft = { id?: string; name: string; executable: string; args: string; env: string };
 
 const field = "w-full rounded border border-line bg-midnight px-2 py-1 text-sm outline-none focus:border-purple";
@@ -22,6 +26,16 @@ function Launcher() {
   const workspace = useStore((s) => s.workspaces.find((w) => w.id === s.activeWorkspaceId));
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const [error, setError] = useState<string | null>(null);
+  // Opt-in worktree (ADR 0028): off by default, offered only where the backend says it can work.
+  const [wt, setWt] = useState(false);
+  const [support, setSupport] = useState<WorktreeSupport | null>(null);
+  const [sameFolder, setSameFolder] = useState(0);
+  const wsId = workspace?.id;
+  useEffect(() => {
+    if (!wsId) return;
+    worktreeApi.support(wsId).then(setSupport).catch(() => setSupport(null));
+    worktreeApi.agentsInFolder(wsId).then(setSameFolder).catch(() => setSameFolder(0));
+  }, [wsId]);
 
   const run = async (p: Promise<AgentInfo[]>, then?: () => void) => {
     try {
@@ -33,9 +47,22 @@ function Launcher() {
     }
   };
 
-  const launch = (a: AgentInfo, reviewed: boolean) => {
+  const launch = (a: AgentInfo) => {
     close();
-    useStore.getState().launchAgent(a.id, reviewed);
+    useStore.getState().launchAgent(a.id, { worktree: wt });
+  };
+
+  /** Ask the backend whether this agent may start. If it needs approval, show the review it built. */
+  const start = async (a: AgentInfo) => {
+    if (!workspace) return;
+    try {
+      const r = await agentApi.authorize(workspace.id, a.id, wt);
+      setError(null);
+      if (r.kind === "allowed") launch(a);
+      else setMode({ kind: "review", id: a.id, requests: r.requests });
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
@@ -65,11 +92,8 @@ function Launcher() {
                     </>
                   )}
                   {a.resolvedPath ? (
-                    <button
-                      className={`${btn} btn-primary`}
-                      // Presets already reviewed for this exact executable launch directly; everything else is reviewed first.
-                      onClick={() => (a.kind === "preset" && a.approved ? launch(a, false) : setMode({ kind: "review", id: a.id }))}
-                    >
+                    // The backend decides: an agent with a matching approval starts, anything else is reviewed first.
+                    <button className={`${btn} btn-primary`} onClick={() => void start(a)}>
                       Launch
                     </button>
                   ) : (
@@ -78,6 +102,20 @@ function Launcher() {
                 </li>
               ))}
             </ul>
+            <div className="mt-3 rounded border border-line/60 p-2" data-worktree-option>
+              <label className={`flex items-start gap-2 text-xs ${support?.state === "ok" ? "text-cloud" : "text-faint"}`}>
+                <input type="checkbox" className="mt-0.5" checked={wt && support?.state === "ok"} disabled={support?.state !== "ok"} onChange={(e) => setWt(e.target.checked)} aria-label="Run in a separate worktree" />
+                <span>
+                  Run in a separate worktree
+                  <span className="block text-[11px] text-faint">{support?.state === "unavailable" ? support.reason : "Gives this agent its own branch and folder so it cannot overwrite your files or another agent’s. Creating it needs your approval; the branch is kept when it is removed."}</span>
+                </span>
+              </label>
+              {sameFolder > 0 && !wt && support?.state === "ok" && (
+                <p className="mt-2 text-[11px] text-warning" data-same-folder-warning>
+                  {sameFolder === 1 ? "Another agent is already running in this folder." : `${sameFolder} agents are already running in this folder.`} Agents in the same folder can overwrite each other’s files. A separate worktree avoids that.
+                </p>
+              )}
+            </div>
             {error && <p className="mt-2 text-xs text-danger">{error}</p>}
             <div className="mt-3 flex justify-between">
               <button className={`${btn} bg-raised hover:bg-line`} onClick={() => setMode({ kind: "edit", draft: { name: "", executable: "", args: "", env: "" } })}>Add custom agent…</button>
@@ -85,16 +123,17 @@ function Launcher() {
             </div>
           </>
         )}
-        {mode.kind === "review" && <Review agent={agents.find((a) => a.id === mode.id)} rootPath={workspace?.rootPath ?? ""} back={() => setMode({ kind: "list" })} launch={launch} run={run} error={error} />}
+        {mode.kind === "review" && <Review agent={agents.find((a) => a.id === mode.id)} requests={mode.requests} rootPath={workspace?.rootPath ?? ""} back={() => setMode({ kind: "list" })} start={start} launch={launch} run={run} error={error} />}
         {mode.kind === "edit" && <Edit draft={mode.draft} back={() => setMode({ kind: "list" })} run={run} error={error} />}
       </div>
     </div>
   );
 }
 
-function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentInfo; rootPath: string; back: () => void; launch: (a: AgentInfo, reviewed: boolean) => void; run: (p: Promise<AgentInfo[]>, then?: () => void) => Promise<void>; error: string | null }) {
+function Review({ agent, requests, rootPath, back, start, launch, run, error }: { agent?: AgentInfo; requests?: ApprovalRequest[]; rootPath: string; back: () => void; start: (a: AgentInfo) => Promise<void>; launch: (a: AgentInfo) => void; run: (p: Promise<AgentInfo[]>, then?: () => void) => Promise<void>; error: string | null }) {
   const [path, setPath] = useState(agent?.pathOverride ?? "");
   const [version, setVersion] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const id = agent?.id;
   const approved = agent?.approved;
   useEffect(() => {
@@ -102,19 +141,48 @@ function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentIn
     if (id && approved) void agentApi.version(id).then(setVersion).catch(() => setVersion(null));
   }, [id, approved]);
   if (!agent) return null;
+  const split = requests ? splitRequests(requests) : null;
+  // The scope choices belong to the main request. Extra requests that can only ever be approved once
+  // (creating a worktree) are approved once alongside it; anything else is never decided for the user.
+  const canProceed = !!split && extrasAreOnceOnly(split.also);
+
+  /** Record the user's decisions, then launch. Each decision names only a request and a scope. */
+  const allow = async (scope: ApprovalScope) => {
+    if (!split) return;
+    try {
+      for (const extra of split.also) await approvalApi.decide(extra.id, { decision: "allow", scope: "once" });
+      await approvalApi.decide(split.main.id, { decision: "allow", scope });
+      launch(agent);
+    } catch (e) {
+      setProblem(String(e));
+    }
+  };
+  const deny = async () => {
+    for (const r of requests ?? []) await approvalApi.decide(r.id, { decision: "deny" }).catch(() => {});
+    back();
+  };
+
   return (
     <>
-      <h2 className="mb-1 text-sm font-semibold">{agent.resolvedPath ? `Review: ${agent.name}` : `Set up ${agent.name}`}</h2>
+      <h2 className="mb-1 text-sm font-semibold">{!agent.resolvedPath ? `Set up ${agent.name}` : split ? `Allow ${agent.name} to start?` : `Review: ${agent.name}`}</h2>
       {agent.adapter?.notice && <p className="mb-3 rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning">{agent.adapter.notice}</p>}
       {version && <p className="mb-2 text-xs text-faint">Installed version: <span className="font-mono text-muted">{version}</span></p>}
       <Capabilities agent={agent} />
       {agent.resolvedPath ? (
         <>
-          <p className="mb-2 text-xs text-muted">This will run the following in your workspace folder. Nothing else is executed.</p>
-          <pre className="mb-2 overflow-auto rounded bg-midnight p-2 text-xs text-cloud">{agent.command}</pre>
+          <p className="mb-2 text-xs text-muted">{split ? "Naurix will do exactly the following, in this order. Nothing else is executed." : "This is what would run in your workspace folder."}</p>
+          {split ? (
+            ordered(requests!).map((r, i, all) => (
+              <div key={r.id} className="mb-2">
+                {all.length > 1 && <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">{i + 1}. {requestTitle(r)}</div>}
+                <pre className="overflow-auto whitespace-pre-wrap rounded bg-midnight p-2 text-xs text-cloud" data-approval-display>{r.display}</pre>
+              </div>
+            ))
+          ) : (
+            <pre className="mb-2 overflow-auto rounded bg-midnight p-2 text-xs text-cloud" data-approval-display>{agent.command}</pre>
+          )}
           <dl className="mb-3 space-y-1 text-xs text-muted">
-            <div><dt className="inline text-faint">Working directory: </dt><dd className="inline break-all">{rootPath}</dd></div>
-            {agent.env.length > 0 && <div><dt className="inline text-faint">Extra environment: </dt><dd className="inline">{agent.env.map((e) => `${e.name}=${e.value}`).join(", ")}</dd></div>}
+            <div><dt className="inline text-faint">Working directory: </dt><dd className="inline break-all">{split && split.also.length > 0 ? "the new worktree" : rootPath}</dd></div>
           </dl>
         </>
       ) : (
@@ -126,11 +194,26 @@ function Review({ agent, rootPath, back, launch, run, error }: { agent?: AgentIn
         <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void agentApi.pickExecutable().then((p) => p && setPath(p))}>Browse…</button>
         <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void run(agentApi.setPath(agent.id, path.trim() || null))}>Save</button>
       </div>
-      {error && <p className="mb-2 text-xs text-danger">{error}</p>}
-      <div className="flex justify-between">
-        <button className={`${btn} bg-raised hover:bg-line`} onClick={back}>Back</button>
-        <button disabled={!agent.resolvedPath} className={`${btn} btn-primary disabled:opacity-40`} onClick={() => launch(agent, true)}>Launch</button>
-      </div>
+      {(error || problem) && <p className="mb-2 text-xs text-danger">{problem ?? error}</p>}
+      {split ? (
+        <>
+          <p className="mb-2 text-xs text-faint">A choice other than “once” is remembered for this exact program and arguments. If either changes you are asked again. {split.also.length > 0 ? "Creating the worktree is a change to your Git repository, so it is approved once, every time. " : ""}You can withdraw approvals in Settings, Security.</p>
+          {!canProceed && <p className="mb-2 text-xs text-danger">This needs a separate decision that this dialog does not make for you.</p>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button className={`${btn} bg-raised hover:bg-line`} onClick={() => void deny()}>Don’t allow</button>
+            <div className="flex flex-wrap gap-2">
+              {split.main.allowedScopes.map((sc, i) => (
+                <button key={sc} disabled={!canProceed} className={`${btn} ${i === 0 ? "btn-primary" : "bg-raised hover:bg-line"} disabled:opacity-40`} onClick={() => void allow(sc)}>{scopeLabel(sc)}</button>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex justify-between">
+          <button className={`${btn} bg-raised hover:bg-line`} onClick={back}>Back</button>
+          <button disabled={!agent.resolvedPath} className={`${btn} btn-primary disabled:opacity-40`} onClick={() => void start(agent)}>Launch</button>
+        </div>
+      )}
     </>
   );
 }

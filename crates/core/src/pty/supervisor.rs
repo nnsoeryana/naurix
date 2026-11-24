@@ -33,10 +33,14 @@ impl Supervisor {
     pub fn spawn(&self, spec: &SpawnSpec) -> Result<(SessionId, Receiver<SessionEvent>), PtyError> {
         let id = SessionId(self.next.fetch_add(1, Ordering::Relaxed) + 1);
         let reg = self.sessions.clone();
+        // Hold the registry across the spawn. A child that exits at once reports its exit from a
+        // background thread; that callback removes the session and must not run before the session has
+        // been inserted, or the removal finds nothing and the session stays registered forever.
+        let mut sessions = self.sessions.lock().unwrap();
         let (session, rx) = PtySession::spawn(spec, move |_: &ExitInfo| {
             reg.lock().unwrap().remove(&id);
         })?;
-        self.sessions.lock().unwrap().insert(id, session);
+        sessions.insert(id, session);
         Ok((id, rx))
     }
 

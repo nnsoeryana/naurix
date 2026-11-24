@@ -139,12 +139,49 @@ fn valid_hex_color(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Most agents that may run at once (ADR 0027). Plain terminals are never limited.
+pub const AGENTS_MIN: u8 = 1;
+pub const AGENTS_MAX: u8 = 16;
+/// Four is the only concurrency figure measured so far (`bench/results`).
+pub const AGENTS_DEFAULT: u8 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Agents {
+    /// A resource guard, not a safety control: launching another agent at the limit fails and starts nothing.
+    pub max_concurrent: u8,
+    /// Ids of agents the user allowed to report their status (ADR 0029). Off for everyone by default.
+    pub status_signals: Vec<String>,
+}
+
+/// Agents that can report status: only those whose adapter has a Verified capability.
+pub fn supports_status(id: &str) -> bool {
+    crate::agents::adapter_for(id).is_some_and(|a| a.status_args().is_some())
+}
+
+impl Agents {
+    /// Whether the user opted `id` in and it can report status here.
+    pub fn status_enabled(&self, id: &str) -> bool {
+        self.status_signals.iter().any(|a| a == id) && supports_status(id)
+    }
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            max_concurrent: AGENTS_DEFAULT,
+            status_signals: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub general: General,
     pub appearance: Appearance,
     pub terminal: Terminal,
+    pub agents: Agents,
 }
 
 /// A CSS font-family list is assembled on the frontend from this string, so only characters that
@@ -195,6 +232,21 @@ pub fn validate(s: &Settings) -> Result<Settings, DbError> {
             "Scrollback must be between {SCROLLBACK_MIN} and {SCROLLBACK_MAX} lines."
         ));
     }
+    if !(AGENTS_MIN..=AGENTS_MAX).contains(&s.agents.max_concurrent) {
+        return bad(&format!(
+            "Agents running at once must be between {AGENTS_MIN} and {AGENTS_MAX}."
+        ));
+    }
+    if let Some(id) = s
+        .agents
+        .status_signals
+        .iter()
+        .find(|id| !supports_status(id))
+    {
+        return bad(&format!("'{id}' cannot report its status."));
+    }
+    s.agents.status_signals.sort();
+    s.agents.status_signals.dedup();
     s.terminal.shell_path = match s.terminal.shell_path.as_deref().map(str::trim) {
         None | Some("") => None,
         Some(p) if is_executable_file(p) => Some(p.to_string()),
@@ -230,6 +282,12 @@ fn sanitize(mut s: Settings) -> Settings {
     if !(SCROLLBACK_MIN..=SCROLLBACK_MAX).contains(&s.terminal.scrollback) {
         s.terminal.scrollback = d.scrollback;
     }
+    if !(AGENTS_MIN..=AGENTS_MAX).contains(&s.agents.max_concurrent) {
+        s.agents.max_concurrent = AGENTS_DEFAULT;
+    }
+    s.agents.status_signals.retain(|id| supports_status(id));
+    s.agents.status_signals.sort();
+    s.agents.status_signals.dedup();
     s.terminal.shell_path = s
         .terminal
         .shell_path
@@ -339,6 +397,34 @@ mod tests {
         assert_eq!(json["general"]["closeOnCleanExit"], false);
         assert_eq!(reset(&db).unwrap(), Settings::default());
         assert_eq!(get(&db).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn the_agent_limit_defaults_to_four_is_validated_and_read_tolerantly() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, 4);
+        assert_eq!(
+            serde_json::to_value(Settings::default()).unwrap()["agents"]["maxConcurrent"],
+            4
+        );
+        for ok in [AGENTS_MIN, 8, AGENTS_MAX] {
+            let mut s = Settings::default();
+            s.agents.max_concurrent = ok;
+            assert_eq!(update(&db, &s).unwrap().agents.max_concurrent, ok);
+        }
+        for bad in [0, AGENTS_MAX + 1, 255] {
+            let mut s = Settings::default();
+            s.agents.max_concurrent = bad;
+            assert!(update(&db, &s).is_err(), "{bad}");
+        }
+        // A stored document with an unusable value falls back to the default instead of failing.
+        db.set_setting(KEY, r#"{"agents":{"maxConcurrent":99}}"#)
+            .unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, AGENTS_DEFAULT);
+        // A document written before this setting existed still loads.
+        db.set_setting(KEY, r#"{"terminal":{"fontSize":14}}"#)
+            .unwrap();
+        assert_eq!(get(&db).unwrap().agents.max_concurrent, AGENTS_DEFAULT);
     }
 
     #[test]
@@ -517,5 +603,28 @@ mod tests {
             "/bin/sh",
             "a stale configured shell falls back"
         );
+    }
+
+    #[test]
+    fn status_signals_are_off_by_default_and_only_for_agents_that_can_report() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(get(&db).unwrap().agents.status_signals.is_empty());
+        assert!(!get(&db).unwrap().agents.status_enabled("claude-code"));
+        let mut s = Settings::default();
+        s.agents.status_signals = vec!["claude-code".into(), "claude-code".into()];
+        let saved = update(&db, &s).unwrap();
+        assert_eq!(saved.agents.status_signals, ["claude-code"]);
+        assert_eq!(saved.agents.status_enabled("claude-code"), cfg!(unix));
+        for bad in ["codex", "custom-1", ""] {
+            s.agents.status_signals = vec![bad.into()];
+            assert!(update(&db, &s).is_err(), "{bad:?} cannot report status");
+        }
+        // A stored list with an unusable entry is cleaned on read, not trusted.
+        db.set_setting(
+            KEY,
+            r#"{"agents":{"statusSignals":["claude-code","nope"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(get(&db).unwrap().agents.status_signals, ["claude-code"]);
     }
 }

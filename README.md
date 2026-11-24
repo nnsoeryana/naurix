@@ -265,7 +265,20 @@ NAURIX_SMOKE_OUT=/tmp/naurix-smoke.json NAURIX_SMOKE_WORKSPACE=/tmp/naurix-proj 
 # wait ~20 s, then:  cat /tmp/naurix-smoke.json
 ```
 
-`./run.sh sandbox` uses a throwaway data folder and its own dev-server port, so it can run next to your normal copy and never touches your real workspaces. (The smoke and benchmark modes refuse to run unless `NAURIX_DATA_DIR` is set, which the sandbox does for you.) The scenario also exercises the agent flow using `scripts/mock-agent`, a tiny scripted stand-in for an agent CLI (it needs that file copied into the workspace folder, as above).
+`./run.sh sandbox` uses a throwaway data folder and its own dev-server port, so it can run next to your normal copy and never touches your real workspaces. (The smoke and benchmark modes refuse to run unless `NAURIX_DATA_DIR` is set, which the sandbox does for you.) Further scenarios run with `NAURIX_SMOKE_VISUAL=<mode>` (the same variables, and `NAURIX_DATA_DIR` is set by the sandbox):
+
+| Mode | What it drives | Needs in the workspace folder |
+|---|---|---|
+| `reload` | sessions surviving a webview reload (ADR 0026) | `scripts/mock-agent` |
+| `limit` | the agent limit and approvals (ADR 0027) | `scripts/mock-agent` |
+| `worktree` | agents in their own Git worktree (ADR 0028) | `scripts/mock-agent` and a Git repository |
+| `status` | opt-in status signals (ADR 0029) | `scripts/mock-status-agent` |
+| `workflow` | workflows and runs through the Workflows view (ADR 0030) | nothing (uses `/bin/sh`) |
+| `memory` | project memory through the Memory view (ADR 0031) | nothing (uses `/bin/sh`) |
+
+`scripts/mock-status-agent` stands in for Claude Code: it finds the hooks Naurix passed with `--settings` and runs them the way Claude Code does, feeding a "secret" prompt on their standard input to show that no hook reads it. The report is written to `NAURIX_SMOKE_OUT`. Native dialogs (such as the memory export) cannot be driven by this harness.
+
+The scenario also exercises the agent flow using `scripts/mock-agent`, a tiny scripted stand-in for an agent CLI (it needs that file copied into the workspace folder, as above).
 
 ### Measure memory (release build)
 
