@@ -524,7 +524,7 @@ fn migrate(conn: &mut Connection) -> Result<(), DbError> {
     let current = conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize;
     if current > MIGRATIONS.len() {
         return Err(DbError::Invalid(format!(
-            "database schema v{current} is newer than this app supports (v{})",
+            "Your Naurix data was saved by a newer version of Naurix (database schema v{current}; this version supports up to v{}). Install the latest Naurix to open it.",
             MIGRATIONS.len()
         )));
     }

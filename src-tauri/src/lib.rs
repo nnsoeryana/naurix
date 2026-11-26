@@ -91,6 +91,88 @@ fn build_menu<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<
     Menu::with_items(handle, &[&app, &edit, &window])
 }
 
+/// Everything the app needs before the window is usable: data folder, database, services.
+fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // NAURIX_DATA_DIR (absolute path) points the app at a separate data folder, so tests and
+    // experiments never touch your real workspaces. Without it, the standard app data folder is used.
+    let dir = match std::env::var_os("NAURIX_DATA_DIR").map(std::path::PathBuf::from) {
+        Some(d) if d.is_absolute() => d,
+        Some(d) => {
+            return Err(format!(
+                "NAURIX_DATA_DIR must be an absolute path, got {}",
+                d.display()
+            )
+            .into())
+        }
+        None => {
+            let dir = app.path().app_data_dir()?;
+            // Pre-rename installs stored data under dev.agentterminal.app; keep it.
+            if let Some(parent) = dir.parent() {
+                let _ = naurix_core::persistence::migrate_legacy_data_dir(
+                    &parent.join("dev.agentterminal.app"),
+                    &dir,
+                );
+            }
+            dir
+        }
+    };
+    std::fs::create_dir_all(&dir)?;
+    let db = Arc::new(Db::open(&dir.join("naurix.db")).map_err(|e| e.to_string())?);
+    // Recovery (DATA-004): processes do not survive a restart.
+    db.mark_active_sessions_interrupted()
+        .map_err(|e| e.to_string())?;
+    db.prune_sessions(50).map_err(|e| e.to_string())?;
+    app.manage(db.clone());
+    // Approval gate (ADR 0027). Earlier preset approvals become grants once, so nobody is asked
+    // again for what they already approved. A failure leaves the old setting for the next start.
+    let gate: approval::SharedGate = Arc::new(naurix_core::approval::ApprovalGate::new(db.clone()));
+    let _ = naurix_core::agents::migrate_legacy_approvals(&db, &gate);
+    let engine_gate = gate.clone();
+    app.manage(gate);
+    app.manage(mcp::DataDir(dir.clone()));
+    // Half-finished downloads from a previous run are never reused.
+    let skills = naurix_core::skills::SkillStore::new(&db, &dir);
+    skills.cleanup_staging();
+    skills.seed_builtin();
+    let secrets: mcp::SharedSecrets = Arc::new(naurix_core::mcp::KeychainStore);
+    app.manage(secrets.clone());
+    let terminals: SharedTerminals = Arc::new(SessionManager::new(db.clone(), TERMINATE_GRACE));
+    if let Ok(s) = naurix_core::settings::get(&db) {
+        terminals.set_max_agents(usize::from(s.agents.max_concurrent));
+    }
+    // No session survives a restart, so no status file is still wanted.
+    naurix_core::signals::purge(&dir);
+    events::bridge_session_events(app.handle().clone(), &terminals);
+    // Workflows (ADR 0030): runs left over from a previous start become `interrupted`.
+    app.manage(workflow::start_engine(
+        db.clone(),
+        engine_gate,
+        terminals.clone(),
+        secrets,
+        dir.clone(),
+    ));
+    app.manage(terminals);
+    Ok(())
+}
+
+/// A failed start must not abort the process ("quit unexpectedly"): hide the window, say what went
+/// wrong and how to fix it, then exit cleanly once the user dismisses the message.
+fn startup_failed(app: &tauri::App, reason: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    eprintln!("Naurix could not start: {reason}");
+    // Hidden, not destroyed: destroying the last window exits before the message is seen. The Dock
+    // icon does not bring it back either (see `lifecycle::show_main_window`).
+    for w in app.webview_windows().values() {
+        let _ = w.hide();
+    }
+    let handle = app.handle().clone();
+    app.dialog()
+        .message(format!("Naurix could not start.\n\n{reason}"))
+        .title("Naurix")
+        .kind(MessageDialogKind::Error)
+        .show(move |_| handle.exit(1));
+}
+
 pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     // The custom menu only exists to rebind Cmd+W on macOS. Linux and Windows get no menu bar:
@@ -103,67 +185,9 @@ pub fn run() {
     });
     let app = builder
         .setup(|app| {
-            // NAURIX_DATA_DIR (absolute path) points the app at a separate data folder, so tests and
-            // experiments never touch your real workspaces. Without it, the standard app data folder is used.
-            let dir = match std::env::var_os("NAURIX_DATA_DIR").map(std::path::PathBuf::from) {
-                Some(d) if d.is_absolute() => d,
-                Some(d) => {
-                    return Err(format!(
-                        "NAURIX_DATA_DIR must be an absolute path, got {}",
-                        d.display()
-                    )
-                    .into())
-                }
-                None => {
-                    let dir = app.path().app_data_dir()?;
-                    // Pre-rename installs stored data under dev.agentterminal.app; keep it.
-                    if let Some(parent) = dir.parent() {
-                        let _ = naurix_core::persistence::migrate_legacy_data_dir(
-                            &parent.join("dev.agentterminal.app"),
-                            &dir,
-                        );
-                    }
-                    dir
-                }
-            };
-            std::fs::create_dir_all(&dir)?;
-            let db = Arc::new(Db::open(&dir.join("naurix.db")).map_err(|e| e.to_string())?);
-            // Recovery (DATA-004): processes do not survive a restart.
-            db.mark_active_sessions_interrupted()
-                .map_err(|e| e.to_string())?;
-            db.prune_sessions(50).map_err(|e| e.to_string())?;
-            app.manage(db.clone());
-            // Approval gate (ADR 0027). Earlier preset approvals become grants once, so nobody is asked
-            // again for what they already approved. A failure leaves the old setting for the next start.
-            let gate: approval::SharedGate =
-                Arc::new(naurix_core::approval::ApprovalGate::new(db.clone()));
-            let _ = naurix_core::agents::migrate_legacy_approvals(&db, &gate);
-            let engine_gate = gate.clone();
-            app.manage(gate);
-            app.manage(mcp::DataDir(dir.clone()));
-            // Half-finished downloads from a previous run are never reused.
-            let skills = naurix_core::skills::SkillStore::new(&db, &dir);
-            skills.cleanup_staging();
-            skills.seed_builtin();
-            let secrets: mcp::SharedSecrets = Arc::new(naurix_core::mcp::KeychainStore);
-            app.manage(secrets.clone());
-            let terminals: SharedTerminals =
-                Arc::new(SessionManager::new(db.clone(), TERMINATE_GRACE));
-            if let Ok(s) = naurix_core::settings::get(&db) {
-                terminals.set_max_agents(usize::from(s.agents.max_concurrent));
+            if let Err(e) = init(app) {
+                startup_failed(app, &e.to_string());
             }
-            // No session survives a restart, so no status file is still wanted.
-            naurix_core::signals::purge(&dir);
-            events::bridge_session_events(app.handle().clone(), &terminals);
-            // Workflows (ADR 0030): runs left over from a previous start become `interrupted`.
-            app.manage(workflow::start_engine(
-                db.clone(),
-                engine_gate,
-                terminals.clone(),
-                secrets,
-                dir.clone(),
-            ));
-            app.manage(terminals);
             Ok(())
         })
         .on_window_event(lifecycle::on_window_event)

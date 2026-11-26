@@ -18,6 +18,10 @@ pub const MENU_QUIT: &str = "naurix-quit";
 
 #[cfg(target_os = "macos")]
 fn show_main_window(app: &AppHandle) {
+    // Startup failed (see `startup_failed` in lib.rs): there is nothing usable to show.
+    if app.try_state::<SharedTerminals>().is_none() {
+        return;
+    }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
