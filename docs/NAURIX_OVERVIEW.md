@@ -1,6 +1,6 @@
 # Naurix — Dokumen Lengkap
 
-**Dibuat:** 23 November 2026
+**Dibuat:** 23 November 2026, diperbarui 23 November 2026 (sore) setelah tahap 8 (workflow) dan tahap 9 (memori) diimplementasikan, dan sekali lagi untuk perbaikan terakhir (commit sampai `36f4431`, branch `feat/memory`)
 **Sumber:** dokumen di `docs/` (PRD, Product Vision, Technical Design, Implementation Plan, ADR 0001–0030), `AGENTS.md`, `README.md`, serta isi kode di `crates/core`, `src-tauri`, `src`, dan konfigurasi proyek.
 **Catatan:** dokumen ini merangkum keadaan proyek pada tanggal di atas. Bila berbeda dengan ADR atau PRD, yang berlaku adalah ADR dan PRD. Hal yang belum terverifikasi ditandai jelas.
 
@@ -70,7 +70,8 @@ Persona di PRD: **P1** developer berbantuan AI, **P2** power user terminal (akan
 | MCP | Registry pusat, secret di credential store OS, approval, uji koneksi, sinkronisasi ke config agent |
 | Skills | Penyimpanan pusat, instal dari Git/folder, aktif/nonaktif lewat symlink yang dapat dibatalkan |
 | Git | Inspeksi hanya-baca (status, diff, worktree) dan worktree opt-in untuk agent |
-| Orkestrasi (bertahap) | Sesi di Core, event bus, adapter, approval gate, batas agent paralel, worktree, sinyal status |
+| Orkestrasi (bertahap) | Sesi di Core, event bus, adapter, approval gate, batas agent paralel, worktree, sinyal status, workflow dan run |
+| Memori proyek | Catatan yang ditulis pengguna sendiri, opt-in per workspace, dicari dengan FTS5, dapat diekspor |
 | Tampilan | Command palette, 9 tema, companion animasi, pengaturan |
 
 ### 3.2 Di luar scope
@@ -119,8 +120,12 @@ PRD memakai tiga tingkat: **P0** wajib untuk MVP, **P1** bernilai dan boleh meny
 | Worktree opt-in | Agent dapat berjalan di Git worktree terpisah, disetujui sekali per aksi (ADR 0028) |
 | Sinyal status | Status "menunggu" dan sejenisnya hanya dari sinyal agent yang terverifikasi, Claude Code dulu, opt-in (ADR 0029) |
 | Companion | Kartu animasi aurora di sidebar yang hanya informatif |
+| Workflows | Alur kerja yang dapat dipakai ulang: langkah berupa referensi ke agent, dependensi antar langkah, satu persetujuan untuk seluruh run, progres langsung (ADR 0030) |
+| Memori proyek | Catatan opt-in per workspace, pencarian FTS5, penolakan otomatis untuk yang tampak seperti secret, ekspor Markdown/JSON, dan "sisipkan ke terminal agent" (ADR 0031) |
 
-Belum ada: validasi Apple Silicon di perangkat nyata (M11a), penandatanganan dan notarization (M11b, butuh akun Apple Developer), workflow (ADR 0030 masih usulan), dan memori.
+Belum ada: validasi Apple Silicon di perangkat nyata (M11a) dan penandatanganan serta notarization (M11b, butuh akun Apple Developer).
+
+**Catatan status ADR 0030 dan 0031:** keduanya sudah **diimplementasikan** di kode, tetapi di indeks ADR masih bertanda *Proposed* menunggu maintainer menandainya *Accepted*. Setelah itu PRD dan `AGENTS.md` akan mencatatnya selesai. Pemeriksaan visual dan dengan agent nyata belum dilakukan (lihat bagian 16).
 
 ---
 
@@ -189,15 +194,15 @@ Satu gerbang di `crates/core/src/approval` menggantikan parameter `reviewed: boo
 4. UI hanya menjawab (tolak atau izinkan dengan sekop). UI tidak pernah menyuplai fingerprint atau ringkasan.
 5. Fingerprint dihitung ulang saat dipakai, jadi target yang berubah tidak bisa menumpang izin lama.
 
-**Sekop:** `once`, `workspace`, `app` (khusus peluncuran preset, terikat path executable persis). `session` dan `run` menyusul bersama workflow. Tidak ada sekop "setujui semuanya".
+**Sekop:** `once`, `workspace`, `app` (khusus peluncuran preset, terikat path executable persis), dan `run` (izin untuk satu eksekusi workflow, ADR 0030). Sekop `session` tidak ditambahkan karena belum ada yang memerlukannya. Tidak ada sekop "setujui semuanya".
 
 | Kelas aksi | Sekop maksimum |
 |---|---|
 | `LaunchAgent` (preset) | app, untuk path executable persis |
 | `LaunchAgent` (kustom) | workspace, terikat fingerprint penuh |
 | `CreateWorktree`, `RemoveWorktree` | once |
-| Tulis config agent | once (direncanakan) |
-| `RunWorkflow` | run (usulan, ADR 0030) |
+| `RunWorkflow` | once (menghasilkan izin `run` untuk tiap peluncuran agent dalam run itu) |
+| Tulis config agent | once (direncanakan, belum dipindah ke gerbang) |
 
 Izin disimpan sebagai metadata (tabel `approvals`), dapat dicabut di Settings → Security, dibersihkan saat workspace dihapus, dan riwayat dibatasi 200 baris. `sessions.approval_id` mencatat izin mana yang mengizinkan peluncuran.
 
@@ -240,7 +245,36 @@ Status seperti "menunggu persetujuan" **hanya** ditampilkan dari sinyal yang dil
 
 ### 5.10 Event bus (ADR 0024)
 
-Bus event domain di Core hanya membawa **metadata** (`SessionStarted`, `SessionExited`, `SessionStatus`), terpisah dari jalur byte terminal.
+Bus event domain di Core hanya membawa **metadata** (`SessionStarted`, `SessionExited`, `SessionStatus`, dan `RunChanged` dari workflow), terpisah dari jalur byte terminal. Pengiriman event sengaja boleh hilang, sehingga tampilan membaca ulang status saat dibuka dan saat jendela kembali fokus.
+
+### 5.11 Workflow dan run (ADR 0030)
+
+Alur kerja yang dapat dijalankan berkali-kali, tanpa mengubah prinsip kontrol pengguna.
+
+- **Model:** *workflow* adalah templat bernama dalam satu workspace. *Langkah* (step) adalah "jalankan agent X" (preset atau agent kustom, termasuk agent kustom yang hanya berupa perintah seperti `npm test`). *Dependensi*: langkah B menunggu langkah A. **Tidak ada entitas Task terpisah**: langkah adalah tugasnya. *Run* adalah satu eksekusi workflow, dan menyalin langkah serta dependensi saat dimulai (snapshot), jadi mengubah workflow tidak memengaruhi run yang berjalan.
+- **Batas validasi:** maksimal 24 langkah, 64 dependensi, nama 1–60 karakter, tanpa siklus (dicek di Core dengan topological sort). Workflow tidak dapat diubah atau dihapus saat ada run aktif.
+- **Status langkah:** `pending`, `running`, `succeeded`, `failed`, `skipped`, `cancelled`. Status run: `running`, `succeeded`, `failed`, `cancelled`, `interrupted`.
+- **Kapan langkah selesai:** saat prosesnya keluar (kode 0 berarti sukses, selain itu gagal), atau saat pengguna menekan **Mark done** atau **Skip**. Tidak ada heuristik output dan tidak ada sinyal status yang menyelesaikan langkah. Mark done tidak menghentikan agent.
+- **Dependen** mulai bila semua dependensinya `succeeded` atau `skipped`. Langkah yang dependensinya gagal atau dibatalkan tetap `pending` dan ditampilkan sebagai *blocked*.
+- **Persetujuan:** satu persetujuan `RunWorkflow` (sekali pakai) yang meninjau **perintah persis tiap langkah** dan dependensinya. Setelah disetujui, Core membuat izin ber-sekop `run` untuk tiap peluncuran agent berbeda dalam run itu. Izin ini hanya cocok untuk peluncuran oleh run tersebut, dicabut saat run berakhir, dan bila ada peluncuran yang belum tercakup (misalnya path program berubah), langkah itu gagal dengan catatan `approval missing`. Tidak pernah bertanya di tengah run.
+- **Langkah hanya referensi ke agent.** Tidak ada prompt tersimpan dan tidak ada input otomatis. Langkah yang butuh argumen tetap memakai agent kustom.
+- **Eksekusi:** engine di Core tidak memiliki proses. Ia meminta `SessionManager` memulai sesi lewat launcher dari shell (jalur peluncuran agent yang sama, jadi Terminal Runtime tetap tidak tahu soal workflow). Sesi langkah berjalan *detached*, dan tombol **Open terminal** memasangnya ke pane. Beberapa langkah independen dapat berjalan bersamaan, tunduk pada batas agent. Langkah yang kehabisan slot tetap `pending` dan dicoba lagi saat sesi lain berakhir.
+- **Restart:** run yang berjalan ditandai `interrupted` dan langkahnya `failed` dengan catatan `interrupted`. Tidak ada yang dilanjutkan otomatis.
+- **Batas yang sengaja ada:** tanpa worktree dalam workflow (Git mutation tidak dapat disetujui di muka), tanpa kondisi, loop, retry, jadwal, pemicu, atau variabel, dan tanpa tipe langkah perintah shell.
+
+### 5.12 Memori proyek (ADR 0031)
+
+Catatan yang ditulis pengguna sendiri, bukan hasil tangkapan otomatis.
+
+- **Catatan:** judul 1–100 karakter dan isi hingga 8.000 karakter, maksimal 200 catatan per workspace. Tanpa tag, lampiran, atau tautan ke file atau sesi.
+- **Opt-in per workspace.** Memori mati untuk setiap workspace sampai pengguna menyalakannya. Saat mati, catatan lama disimpan tetapi disembunyikan, dengan tombol **Delete all notes** agar tidak ada yang tersisa tanpa jalan untuk menghapus. Menghapus workspace menghapus catatannya.
+- **Penyimpanan:** SQLite dengan tabel FTS5 (`memory_fts`, tokenizer `unicode61` dengan penghilangan diakritik) dan trigger yang menjaga indeks sinkron. FTS5 sudah terkompilasi di SQLite bawaan (3.54.1), sehingga tanpa dependensi baru. Menghapus catatan, semua catatan, atau workspace juga menghapus baris indeksnya.
+- **Secret ditolak tanpa opsi override.** Pemindai mencari header private key, AWS key id, token GitHub (`ghp_`, `github_pat_`), key bergaya `sk-`, token Slack, key Google API, JWT, serta penetapan `nama = nilai` untuk nama yang menyiratkan rahasia dengan nilai panjang yang tampak acak. Penolakan menyebut **baris dan jenisnya** tetapi tidak pernah mengulang nilainya. Ini jaring pengaman, bukan jaminan, dan UI menyatakannya.
+- **Pencarian:** kueri pengguna tidak pernah diteruskan ke FTS5 apa adanya. Ia dipecah menjadi kata dan tiap kata dikutip sebagai awalan, sehingga operator FTS5 tidak berlaku. Hasil diurutkan relevansi dan dibatasi 50.
+- **Pengiriman ke agent:** tombol **Insert into agent terminal** mengetik teks catatan ke pane aktif **bila pane itu sesi agent**, lewat paste terminal, **tanpa menekan Enter**. Ditolak untuk pane shell biasa. Catatan multibaris hanya disisipkan bila agent mengaktifkan bracketed paste. Tidak ada file agent yang ditulis. Menulis ke file memori milik agent (CLAUDE.md dan sejenisnya) belum dibuat dan butuh ADR sendiri.
+- **Ekspor:** Markdown dan JSON. Backend membuka dialog simpan sendiri, jadi tujuan tidak pernah dari webview. Bila tujuan berada di dalam repositori Git, diminta konfirmasi kedua yang menyebut risikonya. Naurix tidak pernah menjalankan `git add` atau `git commit`.
+- **Hanya pengguna yang membuat catatan.** Tidak ada jalur bagi agent untuk menulis catatan (tanpa tool MCP, hook, atau tangkapan output).
+- **Privasi di kode:** isi catatan tidak dicatat di log, tidak masuk pesan error, dan tidak disertakan dalam event.
 
 ---
 
@@ -316,6 +350,8 @@ naurix/
 | `approval/` | Approval gate, fingerprint, sekop, riwayat |
 | `events.rs` | Event bus domain |
 | `signals.rs` | Sinyal status agent terverifikasi |
+| `workflow/` | Model dan validasi workflow, penyimpanan, dan engine yang memulai langkah dari status proses |
+| `memory/` | Catatan memori, pencarian FTS5, ekspor, pengecekan repositori, dan pemindai secret (`secrets.rs`) |
 | `git/` | Runner Git yang diperkeras, status, diff, worktree |
 | `mcp/`, `skills/` | Registry, approval, sinkronisasi ke config agent |
 | `persistence/` | SQLite, migrasi, workspace |
@@ -325,11 +361,11 @@ naurix/
 
 ### Modul jembatan (`src-tauri/src`)
 
-`agent`, `approval`, `clipboard`, `events`, `git`, `lifecycle`, `mcp`, `settings`, `skills`, `terminal`, `workspace`, `worktree`.
+`agent`, `approval`, `clipboard`, `events`, `git`, `lifecycle`, `mcp`, `memory`, `settings`, `skills`, `terminal`, `workflow`, `workspace`, `worktree`.
 
 ### Fitur UI (`src/features`)
 
-`agents`, `appearance`, `approvals`, `git`, `home`, `layout`, `mcp`, `naurix` (companion), `palette`, `settings`, `skills`, `tabs`, `terminal`, `workspaces`, `worktrees`. State global di `src/state/store.ts`, tema di `src/themes/`, harness smoke di `src/dev/smoke.ts`.
+`agents`, `appearance`, `approvals`, `git`, `home`, `layout`, `mcp`, `memory`, `naurix` (companion), `palette`, `settings`, `skills`, `tabs`, `terminal`, `workflows`, `workspaces`, `worktrees`. State global di `src/state/store.ts`, tema di `src/themes/`, harness smoke di `src/dev/smoke.ts`.
 
 ---
 
@@ -347,8 +383,14 @@ SQLite menyimpan **metadata saja**. Tabel pada migrasi saat ini:
 | `skills`, `skill_links` | Skill terpasang dan symlink yang dibuat |
 | `approvals` | Kelas, sekop, fingerprint, ringkasan (tanpa argumen atau nilai environment), status |
 | `worktrees` | Worktree yang dibuat Naurix (path, branch, commit dasar) |
+| `workflows`, `workflow_steps`, `workflow_deps` | Templat workflow, langkah (hanya referensi `agent_id`), dan dependensi |
+| `runs`, `run_steps`, `run_deps` | Eksekusi workflow sebagai snapshot, status tiap langkah, kode keluar, dan catatan berkosakata tetap (misalnya `agent not found`, `approval missing`), tidak pernah output proses |
+| `memory_notes` | Catatan memori opt-in (judul, isi, waktu) per workspace |
+| `memory_fts` | Tabel virtual FTS5 untuk pencarian catatan |
 
-**Tidak disimpan:** input atau output terminal, prompt, nilai environment, isi source. Satu-satunya teks pengguna di luar metadata adalah catatan memori opt-in per workspace (ADR 0022), yang **belum diimplementasikan**.
+Kolom `workspaces.memory_enabled` (bawaan 0) menyimpan opt-in memori. Migrasi bersifat *append-only*: migrasi 5 menambah worktree, 6 workflow dan run, 7 memori.
+
+**Tidak disimpan:** input atau output terminal, prompt, nilai environment, isi source. Satu-satunya teks pengguna di luar metadata adalah **catatan memori** yang diketik sendiri oleh pengguna dan di-opt-in per workspace (ADR 0022, 0031). Nama workflow dan langkah juga teks yang diketik pengguna, dibatasi panjangnya dan dibersihkan dari karakter kontrol.
 
 ---
 
@@ -360,6 +402,9 @@ SQLite menyimpan **metadata saja**. Tabel pada migrasi saat ini:
 - **Tidak menimpa file milik pengguna.** Sinkronisasi MCP/skill melalui dry-run, persetujuan, cadangan, dan dapat dibatalkan.
 - **Git diperkeras terhadap repositori berbahaya** (ADR 0017): hook dinonaktifkan, `fsmonitor` mati, `diff.external` dan `credential.helper` dikosongkan, lingkungan dibersihkan, tanpa prompt terminal, output dan waktu dibatasi.
 - **Konten proyek dan output agent dianggap tidak tepercaya.**
+- **Catatan memori ditolak bila tampak seperti secret**, tanpa opsi "simpan saja". Pemindai bersifat heuristik dan hanya jaring pengaman.
+- **Memori tidak pernah dikirim ke agent secara diam-diam** dan tidak pernah ditulis ke repositori atau di-commit otomatis.
+- **Workflow tidak mengotomatiskan input.** Langkah tidak menyimpan prompt, dan izin run dicabut saat run berakhir.
 - **Tidak ada telemetri.**
 - **Tidak ada klaim platform atau performa tanpa rekaman nyata.** CI saja bukan bukti.
 - Pelaporan kerentanan lewat GitHub Security Advisories secara privat (`SECURITY.md`).
@@ -433,20 +478,37 @@ Urutan tahap tetap, masing-masing meninggalkan aplikasi tetap bisa dijalankan da
 | 5 | Approval gate dan batas agent (Task/Run dipindah ke tahap 8) | 0027 | Selesai (cek visual dan agent nyata menunggu) |
 | 6 | Isolasi worktree opt-in | 0028 | Selesai (cek visual dan agent nyata menunggu) |
 | 7 | Spike sinyal terstruktur per agent | 0029 | Selesai untuk Claude Code (jalur penolakan interaktif dan platform lain belum terverifikasi) |
-| 8 | Workflow, termasuk Task/Run | 0030 | **Usulan**, belum ada kode |
-| 9 | Memori | — | Belum |
+| 8 | Workflow, termasuk Task/Run | 0030 | Diimplementasikan (cek visual dan agent nyata menunggu; ADR masih *Proposed* menunggu maintainer) |
+| 9 | Memori | 0031 | Diimplementasikan (cek dialog ekspor dan agent nyata menunggu; ADR masih *Proposed* menunggu maintainer) |
 
-Tahap hanya dikerjakan bila maintainer memintanya dan ADR lanjutannya ditulis lebih dulu.
+Dengan ini seluruh sembilan tahap di ADR 0022 sudah memiliki implementasi. Tahap hanya dikerjakan bila maintainer memintanya dan ADR lanjutannya ditulis lebih dulu.
 
-### Rencana tahap 8 (ADR 0030, usulan)
+### Keputusan maintainer untuk tahap 8 (ADR 0030)
 
-Keputusan maintainer yang sudah dicatat: satu persetujuan untuk seluruh run (izin terikat fingerprint workflow dan berakhir bersama run); sebuah langkah selesai saat prosesnya keluar (0 sukses, selain itu gagal) atau saat pengguna menekan *Mark done* atau *Skip*; langkah hanya berupa **referensi ke agent**, tanpa menyimpan prompt dan tanpa input otomatis.
+Satu persetujuan untuk seluruh run (izin terikat fingerprint workflow dan berakhir bersama run). Sebuah langkah selesai saat prosesnya keluar (0 sukses, selain itu gagal) atau saat pengguna menekan *Mark done* atau *Skip*. Langkah hanya berupa **referensi ke agent**, tanpa menyimpan prompt dan tanpa input otomatis.
 
-### Memori (tahap 9, belum dibuat)
+Perbedaan implementasi dari desain: *Cancel* juga membuat langkah yang sedang berjalan menjadi `cancelled` (sesinya dibiarkan hidup); batas agent yang penuh membuat langkah tetap `pending` dan dicoba lagi, bukan gagal; exit yang terlewat oleh bus event dikejar saat run dibaca (`reconcile`); editor hanya menawarkan langkah sebelumnya sebagai dependensi sehingga siklus tidak dapat digambar.
 
-Rencana dari ADR 0022 §3: SQLite dengan FTS5, opt-in per workspace, hanya catatan yang ditulis atau disetujui pengguna, menolak yang tampak seperti kredensial, dapat dilihat, diubah, dihapus, dan diekspor ke Markdown atau JSON, tidak pernah otomatis di-commit ke Git, dan pengiriman ke agent hanya lewat mekanisme yang disetujui dan dapat dibatalkan. Ketersediaan FTS5 pada build yang dikirim harus diverifikasi lebih dulu.
+### Keputusan maintainer untuk tahap 9 (ADR 0031)
+
+1. Pengiriman ke agent berupa **sisipkan ke terminal agent tanpa Enter**, tidak ada file agent yang ditulis.
+2. Dugaan secret **ditolak tanpa override**.
+3. **Hanya pengguna** yang membuat catatan, lewat UI Naurix.
+
+Temuan saat dijalankan: program tanpa bracketed paste (misalnya `cat`) menganggap tiap baris tempel sebagai Enter, sehingga sebagian catatan terkirim sebelum pengguna melihatnya. Karena itu catatan multibaris sekarang ditolak untuk kasus itu dan hanya catatan satu baris yang selalu boleh.
 
 ---
+
+### Perbaikan terbaru setelah tahap 8 dan 9
+
+| Commit | Perbaikan |
+|---|---|
+| `2627e49` | Langkah workflow yang tertahan batas agent kini dimulai saat sesi apa pun berakhir |
+| `9474b62` | UI: balasan pencarian memori yang sudah usang dibuang, draf catatan dan workflow disimpan per proyek, dan status proses yang sudah berakhir tidak lagi ditampilkan |
+| `8ed6513` | Tanda "disetujui" dan pengecekan versi agent kini memperhitungkan peluncuran sebenarnya, termasuk argumen hook status (ADR 0029). Pengecekan itu kini menyertakan argumen tambahan tersebut dalam fingerprint. README mendokumentasikan mode smoke test (`reload`, `limit`, `worktree`, `status`, `workflow`, `memory`) |
+| `36f4431` | PTY: anak proses yang langsung keluar tidak lagi tertinggal terdaftar selamanya. Ada balapan antara `spawn` dan callback exit, kini registry dikunci selama spawn. Tes: `supervisor_race.rs` |
+
+Dua perbaikan terakhir menyentuh jalur yang dipakai setiap peluncuran (approval dan PTY), jadi layak dijalankan ulang di mesin sendiri sebelum rilis (`./run.sh test`).
 
 ## 13. Milestone implementasi MVP
 
@@ -507,7 +569,8 @@ Sebuah ADR tidak diubah setelah *Accepted*. Perubahan keputusan dibuat lewat ADR
 | 0027 | Approval gate pusat | Accepted (diimplementasikan; cek visual dan agent nyata menunggu) |
 | 0028 | Isolasi Git worktree opt-in | Accepted (diimplementasikan; cek visual dan agent nyata menunggu) |
 | 0029 | Sinyal status terverifikasi, Claude Code dulu | Accepted (diimplementasikan untuk Claude Code) |
-| 0030 | Workflow dan run yang dapat dipakai ulang | Proposed |
+| 0030 | Workflow dan run yang dapat dipakai ulang | Proposed (diimplementasikan; cek visual dan agent nyata menunggu) |
+| 0031 | Memori proyek opt-in | Proposed (diimplementasikan; dialog ekspor dan cek agent nyata menunggu) |
 
 ---
 
@@ -546,7 +609,7 @@ Penyelesaian (*definition of done*): kriteria penerimaan terpenuhi, tes mencakup
 
 ### Tes
 
-Tes Rust di `crates/core/tests` mencakup adapter, agent, approval, event, Git, MCP, PTY (termasuk Windows), sesi (reattach dan batas), sinyal status, skill, dan worktree (termasuk repositori berbahaya dengan hook `post-checkout` dan `fsmonitor`). Tes frontend memakai Vitest, dan `src/dev/smoke.ts` adalah harness smoke untuk skenario seperti reload dan approval.
+Tes Rust di `crates/core/tests` mencakup adapter, agent, approval, event, Git, MCP, PTY (termasuk Windows), sesi (reattach dan batas), sinyal status, skill, workflow, memori (FTS5, pemindai secret, kueri berbahaya, dan penghapusan indeks), kondisi balapan supervisor, dan worktree (termasuk repositori berbahaya dengan hook `post-checkout` dan `fsmonitor`). Tes frontend memakai Vitest, dan `src/dev/smoke.ts` adalah harness smoke untuk skenario seperti reload dan approval.
 
 ---
 
@@ -558,6 +621,8 @@ Tes Rust di `crates/core/tests` mencakup adapter, agent, approval, event, Git, M
 - **Ukuran ring buffer 1 MiB** masih hipotesis tanpa benchmark.
 - **Klaim "tidak ada proses yatim setelah aplikasi di-kill"** belum boleh ditulis sebagai jaminan sebelum ada tes setara Spike D.
 - **Hanya Claude Code dan OpenCode** yang MCP-nya terverifikasi. Hanya Claude Code yang sinyal statusnya terverifikasi.
+- **Workflow (ADR 0030):** tampilan Workflows hanya diuji lewat skrip yang menekan tombol dan membaca teks, belum dilihat manusia. Belum ada agent CLI nyata yang dijalankan sebagai langkah (hanya perintah `sh`), langkah dengan status hook aktif belum dicoba, restart saat run aktif baru diuji di Core, dan beberapa run bersamaan atau folder workspace yang hilang belum dicoba di aplikasi. "Sukses" untuk agent interaktif adalah kata pengguna (*Mark done*). Kode 0 hanya berarti proses selesai bersih, bukan hasil kerjanya benar.
+- **Memori (ADR 0031):** ekspor lewat dialog simpan native (dan konfirmasi kedua di dalam repositori Git) belum diuji di aplikasi, hanya isinya di Core. Tampilan Memory belum dilihat manusia. Belum dicoba dengan agent CLI nyata, jadi belum diketahui apakah masing-masing mengaktifkan bracketed paste. Pemindai secret heuristik dan hanya diuji pada bentuk token yang dikenal, sehingga penolakan keliru maupun yang terlewat mungkin terjadi. Impor catatan belum ada.
 - **Approval MCP, sinkronisasi, dan kepercayaan repo Git** belum dipindah ke gerbang pusat. Masing-masing masih mekanisme sendiri.
 - **Fingerprint tidak menghash isi biner executable.** Biner yang diperbarui di path yang sama tetap dianggap disetujui. Ini dinyatakan di teks tinjauan.
 - **Worktree** tidak menyalin file untracked atau ter-ignore dan tidak menginisialisasi submodule.
@@ -577,6 +642,6 @@ Tes Rust di `crates/core/tests` mencakup adapter, agent, approval, event, Git, M
 | Data pengguna? | Hanya metadata di mesin lokal. Secret di credential store OS |
 | Agent didukung? | Claude Code, Codex, Gemini CLI, Antigravity CLI, OpenCode, dan CLI kustom lewat PTY |
 | Platform? | macOS didukung. Linux dan Windows kode selesai tetapi belum divalidasi |
-| Posisi sekarang? | MVP M0–M10 selesai, orkestrasi tahap 1–7 selesai, tahap 8 (workflow) masih usulan |
+| Posisi sekarang? | MVP M0–M10 selesai, orkestrasi tahap 1–9 sudah diimplementasikan (workflow dan memori menunggu penandaan *Accepted* dan pemeriksaan visual) |
 | Bukan apa? | Bukan agent AI, bukan IDE, bukan layanan cloud, tanpa telemetri dan marketplace publik |
 | Lisensi? | Apache-2.0 |
