@@ -211,6 +211,43 @@ export async function runSmoke() {
         await report({ stage: "memory", out });
         return;
       }
+      if (visual === "security") {
+        // Security Suite (ADR 0032): roles and success exit codes on custom agents, a scanner step that
+        // exits 1 completing a workflow, and the Security view. The file dialogs are native and are driven
+        // from outside (osascript) or by hand; this stage leaves the view open on "Open report…".
+        const out: Record<string, unknown> = {};
+        const q = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+        const waitFor = async (cond: () => boolean, ms = 20000) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end && !cond()) await sleep(150);
+          return cond();
+        };
+        const saved = await agentApi.saveCustom({ name: "Red Scanner", executable: "/bin/sh", args: ["-c", "exit 1"], env: [], role: "red", successExitCodes: [1, 0] });
+        await agentApi.saveCustom({ name: "Purple Check", executable: "/bin/sh", args: ["-c", "exit 0"], env: [], role: "purple" });
+        await st().refreshAgents();
+        const red = saved.find((a) => a.name === "Red Scanner")!;
+        const purple = st().agents.find((a) => a.name === "Purple Check")!;
+        out.redAgent = { role: red.role, successExitCodes: red.successExitCodes };
+        out.purpleAgent = { role: purple.role, successExitCodes: purple.successExitCodes };
+
+        await workflowApi.save(w.id, null, "Scan", [{ name: "scan", agentId: red.id, dependsOn: [] }, { name: "check", agentId: purple.id, dependsOn: [0] }]);
+        const flow = (await workflowApi.list(w.id)).find((x) => x.name === "Scan")!;
+        const first = await workflowApi.run(flow.id);
+        if (first.kind === "required") {
+          out.reviewMentionsCodes = first.request.display.includes("exit codes 0, 1 count as success");
+          await approvalApi.decide(first.request.id, { decision: "allow", scope: "once" });
+        }
+        await workflowApi.run(flow.id);
+        await sleep(3000); // both steps exit at once; give the engine time to settle the run
+        const runs = await workflowApi.runs(w.id);
+        out.run = runs.map((r) => ({ state: r.state, steps: r.steps.map((s) => ({ name: s.name, state: s.state, exitCode: s.exitCode, note: s.note })) }));
+
+        st().setView("security");
+        out.viewShown = await waitFor(() => !!q("[data-security]"));
+        out.teams = q("[data-security] section")?.textContent ?? null;
+        await report({ stage: "security", out });
+        return;
+      }
       if (visual === "workflow-graph") {
         // The run graph (ADR 0030): actions by clicking nodes, keyboard reachability, and the light theme.
         const out: Record<string, unknown> = {};

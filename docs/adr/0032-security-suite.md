@@ -134,6 +134,12 @@ Implemented in `crates/core/src/security` (`mod.rs`, `finding.rs`, `sarif.rs`, `
 **Not verified:**
 1. No real scanner's SARIF was used. The fixtures are hand-written to the SARIF 2.1.0 shape, not captured from a tool with a recorded version (ADR 0014 evidence rule).
 2. The `security-severity` convention was not checked against real scanner output.
-3. **The app was not run.** The view, the native file dialogs and the sidebar entry were not looked at or clicked, and a script cannot answer native dialogs anyway (ADR 0031's export has the same gap). Layout, wording and the light-theme contrast of the severity dots need a visual pass on macOS.
+3. **The view was not looked at, and the file dialogs were not used.** The smoke stage `security` (`./run.sh sandbox`, 2026-11-28) ran the real app and showed, from the app's own state:
+   - custom agents saved with roles, and codes normalised to `[0, 1]`;
+   - the run review naming the codes;
+   - a scanner step exiting 1 marked `succeeded`, after which its dependent ran and the run succeeded;
+   - the Security view mounted with the team list.
+
+   Screenshots and dialog automation were blocked: the terminal has no Screen Recording or Accessibility permission. So layout, the light-theme contrast of the severity dots, and opening or comparing reports through the native dialogs still need a person. Layout, wording and the light-theme contrast of the severity dots need a visual pass on macOS.
 4. Windows-style paths are handled lexically and tested on macOS only. Linux and Windows are left to CI.
 5. `docs/USER_MANUAL.pdf` was not regenerated, so it lacks section 12.

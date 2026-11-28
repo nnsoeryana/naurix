@@ -275,6 +275,7 @@ NAURIX_SMOKE_OUT=/tmp/naurix-smoke.json NAURIX_SMOKE_WORKSPACE=/tmp/naurix-proj 
 | `status` | opt-in status signals (ADR 0029) | `scripts/mock-status-agent` |
 | `workflow` | workflows and runs through the Workflows view (ADR 0030) | nothing (uses `/bin/sh`) |
 | `memory` | project memory through the Memory view (ADR 0031) | nothing (uses `/bin/sh`) |
+| `security` | roles and success exit codes on custom agents, a scanner step exiting 1, and the Security view (ADR 0032); the file dialogs are native and checked by hand | nothing (uses `/bin/sh`); put `.sarif` files there to open by hand |
 
 `scripts/mock-status-agent` stands in for Claude Code: it finds the hooks Naurix passed with `--settings` and runs them the way Claude Code does, feeding a "secret" prompt on their standard input to show that no hook reads it. The report is written to `NAURIX_SMOKE_OUT`. Native dialogs (such as the memory export) cannot be driven by this harness.
 
