@@ -296,6 +296,7 @@ fn version_is_only_queried_for_presets_approved_for_every_workspace() {
             executable: exe.to_string_lossy().into_owned(),
             args: vec![],
             env: vec![],
+            ..Default::default()
         })
         .unwrap();
     assert!(matches!(

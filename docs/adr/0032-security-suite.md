@@ -1,5 +1,5 @@
 # ADR 0032 — Security Suite: reviewed reports, never stored findings
-**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-28, see the end). **Partly implemented: the Core report model, the SARIF reader and the comparison (§3–§5). The bridge, the view and the agent changes (§6–§8) are not built yet.**
+**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-28, see the end). **Partly implemented:** the Core report model, the SARIF reader and the comparison (§3–§5), and the exit codes and roles (§7). The bridge and the view (§8) and the offensive approval class (§6) are not built yet.
 
 ## Context
 The maintainer asked for a **Security Suite** inside Naurix with three roles: a Red Team (offensive assessment), a Blue Team (defensive analysis and remediation) and a Purple Team (validating findings, correlating them, and catching security regressions). It must reuse what Naurix has, not add a runtime or platform of its own.
@@ -69,8 +69,8 @@ There is no snippet, no region text, no code-flow data and no raw JSON. The mode
 ### 6. Offensive targets (maintainer decision 2; not built in this ADR)
 Red Team actions that reach beyond static files will need a new approval class, for example `run_offensive_check`, with **once** or **run** scope only. Its fingerprint will cover the tool and the exact target list. The **default target policy is the workspace folder and loopback** (`localhost`, `127.0.0.1`, `::1`). Any other target must be typed by the user and appear in the review. Until that class exists, Naurix starts no network-facing security action other than a custom agent the user reviewed, which is how things work today.
 
-### 7. Scanner exit codes (not built in this ADR)
-Many scanners exit with a non-zero code when they find issues, and ADR 0030 §2 counts that as a failed step that blocks its dependents. A custom agent will gain an optional `success_exit_codes` list (default `[0]`), included in its launch fingerprint. Until then the user presses Skip or Mark done.
+### 7. Scanner exit codes, and roles
+Many scanners exit with a non-zero code when they find issues, and ADR 0030 §2 counts that as a failed step that blocks its dependents. A custom agent will gain an optional `success_exit_codes` list (default `[0]`), included in its launch fingerprint. Agent definitions that never set it keep exactly their earlier fingerprint, so existing approvals still match. A custom agent may also carry a **role** (`red`, `blue` or `purple`). It is a label for grouping and display only; it is not in the fingerprint because it does not change what runs. Both fields are optional JSON fields on the stored custom agent, so no migration is needed and agents saved earlier load unchanged.
 
 ### 8. Bridge and view (not built in this ADR)
 - **Bridge:** `src-tauri/src/security.rs` will open the native file dialog itself (the ADR 0031 §7 pattern), so the webview never names a path. It reads the file through Core and returns the findings to the view.
@@ -110,6 +110,13 @@ Many scanners exit with a non-zero code when they find issues, and ADR 0030 §2 
 
 ## Implementation log (2026-11-28)
 Implemented in `crates/core/src/security` (`mod.rs`, `finding.rs`, `sarif.rs`, `compare.rs`), with tests in `crates/core/tests/security.rs`. No new dependency.
+
+**P5 (2026-11-28):** custom agents have `role` and `success_exit_codes` (`agents/def.rs`: `Role`, `normalize_success_codes`, `launch_action`). The workflow engine reads the codes through a new default method, `Launcher::success_exit_codes`, when a step launches. The launcher editor offers both fields. Tests cover:
+- validation and normalisation of the codes;
+- the unchanged fingerprint for the default `[0]`, pinned against the earlier part list;
+- a role that does not change the fingerprint;
+- old stored agents loading without the fields;
+- a step exiting 1 with `[0, 1]` succeeding, while another agent's exit 3 still fails.
 
 **Not verified:**
 1. No real scanner's SARIF was used. The fixtures are hand-written to the SARIF 2.1.0 shape, not captured from a tool with a recorded version (ADR 0014 evidence rule).

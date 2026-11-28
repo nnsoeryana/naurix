@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 const T: Duration = Duration::from_secs(15);
 
 /// Agents: `ok` exits 0, `fail` exits 3, `slow` exits 0 after a second, `hang` runs until closed,
-/// `secret` prints a marker and exits 0. Anything else is "not installed".
+/// `secret` prints a marker and exits 0, `findings` exits 1 and lists 0 and 1 as success (a scanner
+/// that reports issues, ADR 0032 §7). Anything else is "not installed".
 struct Fake {
     sessions: Arc<SessionManager>,
     /// Changes every action's fingerprint, to simulate a program path that changed after review.
@@ -30,6 +31,7 @@ impl Fake {
             "slow" => "sleep 1; exit 0",
             "hang" => "sleep 60",
             "secret" => "echo PLANTED-OUTPUT-MARKER; exit 0",
+            "findings" => "exit 1",
             _ => return None,
         })
     }
@@ -74,6 +76,14 @@ impl Launcher for Fake {
                 _ => LaunchProblem::Failed,
             })
     }
+
+    fn success_exit_codes(&self, _ws: &str, agent: &str) -> Vec<u32> {
+        if agent == "findings" {
+            vec![0, 1]
+        } else {
+            vec![0]
+        }
+    }
 }
 
 struct Rig {
@@ -94,6 +104,9 @@ impl Launcher for Shared {
     }
     fn launch(&self, w: &str, a: &str, p: &str) -> Result<SessionId, LaunchProblem> {
         self.0.launch(w, a, p)
+    }
+    fn success_exit_codes(&self, w: &str, a: &str) -> Vec<u32> {
+        self.0.success_exit_codes(w, a)
     }
 }
 
@@ -219,6 +232,36 @@ fn a_diamond_runs_in_dependency_order_and_ends_its_grants() {
         .iter()
         .any(|h| h.0 == "run_workflow" && h.2 == "consumed"));
     assert!(history.iter().any(|h| h.1 == "run" && h.2 == "revoked"));
+}
+
+#[test]
+fn an_exit_code_listed_as_success_completes_the_step_and_others_still_fail() {
+    let r = rig();
+    let wf = WorkflowStore::new(&r.db)
+        .save(
+            &r.ws,
+            None,
+            "Scan",
+            &[
+                step("scan", "findings", &[]),
+                step("triage", "ok", &[0]),
+                step("other", "fail", &[]),
+            ],
+        )
+        .unwrap();
+    let run = run_it(&r, &wf.id);
+    assert!(wait_until(|| finished(&r, &run.id)));
+    let run = r.engine.get_run(&run.id).unwrap();
+    assert_eq!(
+        states(&r, &run.id),
+        [
+            StepState::Succeeded,
+            StepState::Succeeded,
+            StepState::Failed
+        ]
+    );
+    assert_eq!(run.steps[0].exit_code, Some(1));
+    assert_eq!(run.steps[0].note, None);
 }
 
 #[test]

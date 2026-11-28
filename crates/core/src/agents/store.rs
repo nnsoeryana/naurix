@@ -1,4 +1,7 @@
-use super::def::{launch_action, plan_launch, validate_custom, AgentDef, CustomAgent, LaunchPlan};
+use super::def::{
+    launch_action, normalize_success_codes, plan_launch, validate_custom, AgentDef, CustomAgent,
+    LaunchPlan,
+};
 use super::AgentError;
 use crate::approval::{ApprovalGate, Scope};
 use crate::persistence::Db;
@@ -64,6 +67,7 @@ impl<'a> AgentStore<'a> {
     pub fn save_custom(&self, mut agent: CustomAgent) -> Result<CustomAgent, AgentError> {
         agent.name = agent.name.trim().to_string();
         validate_custom(&agent)?;
+        normalize_success_codes(&mut agent.success_exit_codes);
         let mut all = self.custom_agents()?;
         if agent.id.is_empty() {
             if all.len() >= MAX_CUSTOM {

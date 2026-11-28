@@ -97,6 +97,13 @@ impl Launcher for ShellLauncher {
             }
         }
     }
+
+    fn success_exit_codes(&self, _workspace_id: &str, agent_id: &str) -> Vec<u32> {
+        naurix_core::agents::AgentStore::new(&self.db)
+            .get(agent_id)
+            .map(|d| d.success_codes())
+            .unwrap_or_else(|_| vec![0])
+    }
 }
 
 /// Build the engine for a data folder and start following session exits. Runs left over from a previous

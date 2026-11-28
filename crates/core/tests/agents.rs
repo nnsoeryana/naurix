@@ -33,6 +33,7 @@ fn new_custom(name: &str, exe: &str) -> CustomAgent {
         executable: exe.into(),
         args: vec![],
         env: vec![],
+        ..Default::default()
     }
 }
 
@@ -357,4 +358,28 @@ fn custom_agents_refuse_values_that_look_like_credentials() {
     assert!(validate_custom(&a).is_ok());
     a.args = vec!["--token=Zq8dK2mP9xV4nB7cL1wR6tY3uH5jF0aS".into()];
     assert!(validate_custom(&a).is_err(), "token in an argument");
+}
+
+#[test]
+fn custom_agents_saved_before_roles_still_load_and_new_fields_round_trip() {
+    let db = Db::open_in_memory().unwrap();
+    db.set_setting(
+        "agents.custom",
+        r#"[{"id":"custom-old","name":"Old","executable":"old","args":[],"env":[]}]"#,
+    )
+    .unwrap();
+    let st = AgentStore::new(&db);
+    let old = st.get("custom-old").unwrap();
+    assert_eq!((old.role, old.success_codes()), (None, vec![0]));
+
+    let saved = st
+        .save_custom(CustomAgent {
+            role: Some(naurix_core::agents::Role::Purple),
+            success_exit_codes: vec![1, 0],
+            ..new_custom("Scanner", "semgrep")
+        })
+        .unwrap();
+    let def = st.get(&saved.id).unwrap();
+    assert_eq!(def.role, Some(naurix_core::agents::Role::Purple));
+    assert_eq!(def.success_codes(), vec![0, 1]);
 }

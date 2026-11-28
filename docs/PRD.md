@@ -201,7 +201,7 @@ Delivered in the stages listed in ADR 0022, each leaving the app runnable. Imple
 
 ### 5.10 Security Suite (ADR 0032)
 
-Red, Blue and Purple are roles delivered as skills and custom agents; Naurix itself only reads and compares security reports the user opens. Optional: none of it is needed to use terminals or agents. Implemented so far: SEC-001 to SEC-003 in Core only (no view yet).
+Red, Blue and Purple are roles delivered as skills and custom agents; Naurix itself only reads and compares security reports the user opens. Optional: none of it is needed to use terminals or agents. Implemented so far: SEC-001 to SEC-003 in Core only (no view yet), and SEC-005.
 
 | ID | Priority | Requirement | Acceptance criteria |
 |---|---|---|---|

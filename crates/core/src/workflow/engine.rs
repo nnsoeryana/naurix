@@ -35,6 +35,11 @@ pub trait Launcher: Send + Sync {
         agent_id: &str,
         approval_id: &str,
     ) -> Result<SessionId, LaunchProblem>;
+    /// Exit codes that mean this agent's step succeeded (ADR 0032 §7). They are part of the launch
+    /// fingerprint the run approval covers, so they cannot change unreviewed.
+    fn success_exit_codes(&self, _workspace_id: &str, _agent_id: &str) -> Vec<u32> {
+        vec![0]
+    }
 }
 
 /// The answer to "start this workflow".
@@ -45,6 +50,14 @@ pub enum StartVerdict {
     Started(Box<Run>),
 }
 
+/// A step whose session is running.
+struct LiveStep {
+    run_id: String,
+    step_id: String,
+    /// Exit codes that count as success (ADR 0032 §7).
+    success: Vec<u32>,
+}
+
 pub struct Engine {
     db: Arc<Db>,
     gate: Arc<ApprovalGate>,
@@ -53,8 +66,8 @@ pub struct Engine {
     /// Serialises every change to run state, so a step that exits while another is being started is
     /// handled after the start finished.
     lock: Mutex<()>,
-    /// Running steps: session -> (run id, step id).
-    live: Mutex<HashMap<SessionId, (String, String)>>,
+    /// Running steps by session.
+    live: Mutex<HashMap<SessionId, LiveStep>>,
 }
 
 impl Engine {
@@ -167,7 +180,7 @@ impl Engine {
         display.push_str(
             "\nApproving this lets these steps start by themselves as the steps before them finish, only for this run. \
              A step that needs something not shown here fails instead of asking. A step is done when its program exits \
-             (0 means success) or when you press Mark done. Nothing here sends input to an agent.",
+             (0 means success, unless the step lists other success exit codes) or when you press Mark done. Nothing here sends input to an agent.",
         );
         let refs: Vec<&str> = parts.iter().map(String::as_str).collect();
         let action = Action::new(
@@ -267,16 +280,23 @@ impl Engine {
         let Some(approval_id) = approval else {
             return fail(note::APPROVAL_MISSING);
         };
+        let success = self
+            .launcher
+            .success_exit_codes(&run.workspace_id, &step.agent_id);
         match self
             .launcher
             .launch(&run.workspace_id, &step.agent_id, &approval_id)
         {
             Ok(session) => {
                 store.start_step(&step.id)?;
-                self.live
-                    .lock()
-                    .unwrap()
-                    .insert(session, (run.id.clone(), step.id.clone()));
+                self.live.lock().unwrap().insert(
+                    session,
+                    LiveStep {
+                        run_id: run.id.clone(),
+                        step_id: step.id.clone(),
+                        success,
+                    },
+                );
                 Ok(())
             }
             Err(LaunchProblem::NotFound) => fail(note::AGENT_NOT_FOUND),
@@ -287,11 +307,16 @@ impl Engine {
 
     fn on_exit(&self, session: SessionId, code: Option<u32>, signalled: bool) {
         let _g = self.lock.lock().unwrap();
-        let Some((run_id, step_id)) = self.live.lock().unwrap().remove(&session) else {
+        let Some(LiveStep {
+            run_id,
+            step_id,
+            success,
+        }) = self.live.lock().unwrap().remove(&session)
+        else {
             return;
         };
         let store = RunStore::new(&self.db);
-        let ok = code == Some(0) && !signalled;
+        let ok = !signalled && code.is_some_and(|c| success.contains(&c));
         let _ = store.finish_step(
             &step_id,
             if ok {
@@ -360,7 +385,7 @@ impl Engine {
             .lock()
             .unwrap()
             .iter()
-            .find(|(_, (_, s))| s == step_id)
+            .find(|(_, l)| l.step_id == step_id)
             .map(|(sid, _)| *sid)
     }
 
@@ -385,7 +410,10 @@ impl Engine {
             ));
         }
         RunStore::new(&self.db).finish_step(step_id, StepState::Succeeded, None, None)?;
-        self.live.lock().unwrap().retain(|_, (_, s)| s != step_id);
+        self.live
+            .lock()
+            .unwrap()
+            .retain(|_, l| l.step_id != step_id);
         self.advance_locked(run_id)?;
         let run = RunStore::new(&self.db).get(run_id)?;
         self.publish(&run);
@@ -420,7 +448,7 @@ impl Engine {
         for s in run.steps.iter().filter(|s| !s.state.is_final()) {
             store.finish_step(&s.id, StepState::Cancelled, None, None)?;
         }
-        self.live.lock().unwrap().retain(|_, (r, _)| r != run_id);
+        self.live.lock().unwrap().retain(|_, l| l.run_id != run_id);
         store.set_run_state(run_id, RunState::Cancelled)?;
         let _ = self.gate.end_run(run_id);
         let run = store.get(run_id)?;

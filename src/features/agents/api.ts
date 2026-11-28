@@ -13,6 +13,9 @@ export type Capability = {
   detail: string;
 };
 
+/** Security Suite role (ADR 0032): a label only, it does not change how the agent runs. */
+export type Role = "red" | "blue" | "purple";
+
 export type AdapterInfo = { capabilities: Capability[]; notice: string | null; verifiedWith: string | null };
 
 export type AgentInfo = {
@@ -30,6 +33,9 @@ export type AgentInfo = {
   command: string | null;
   capabilities: string[];
   adapter: AdapterInfo | null;
+  role: Role | null;
+  /** Exit codes that count as success for a workflow step (at least one; default [0]). */
+  successExitCodes: number[];
 };
 
 export type CustomAgentInput = {
@@ -38,7 +44,19 @@ export type CustomAgentInput = {
   executable: string;
   args: string[];
   env: { name: string; value: string }[];
+  /** Optional: the backend treats a missing value as no role. */
+  role?: Role | null;
+  /** Optional: missing or [0] means only exit code 0 is success. */
+  successExitCodes?: number[];
 };
+
+/** "0, 1" → [0, 1]. Null when any entry is not a whole number from 0 to 255; empty input is [0]. */
+export function parseExitCodes(text: string): number[] | null {
+  const parts = text.split(/[\s,]+/).filter(Boolean);
+  if (parts.length === 0) return [0];
+  const codes = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : NaN));
+  return codes.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? codes : null;
+}
 
 export type AuthorizeResult = { kind: "allowed" } | { kind: "required"; requests: ApprovalRequest[] };
 export type LaunchError = { kind: "approval_required"; requests: ApprovalRequest[] } | { kind: "error"; message: string };

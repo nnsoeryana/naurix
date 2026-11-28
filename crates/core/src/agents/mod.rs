@@ -19,8 +19,8 @@ pub use behavior::{
     adapter_for, agent_adapters, AgentAdapter, McpFileFormat, McpTarget, SkillCompat, SkillFacts,
 };
 pub use def::{
-    launch_action, plan_launch, validate_custom, AgentCapability, AgentDef, AgentKind, CustomAgent,
-    EnvVar, LaunchPlan, PRESETS,
+    launch_action, normalize_success_codes, plan_launch, validate_custom, AgentCapability,
+    AgentDef, AgentKind, CustomAgent, EnvVar, LaunchPlan, Role, MAX_SUCCESS_CODES, PRESETS,
 };
 pub use search::{find_executable, search_dirs};
 pub use store::{migrate_legacy_approvals, AgentStore};

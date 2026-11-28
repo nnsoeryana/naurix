@@ -18,6 +18,19 @@ pub enum AgentKind {
     Custom,
 }
 
+/// A Security Suite role (ADR 0032). A label for grouping and display only: it changes nothing about
+/// how the agent runs, so it is not part of the launch fingerprint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Red,
+    Blue,
+    Purple,
+}
+
+/// At most this many success exit codes per custom agent.
+pub const MAX_SUCCESS_CODES: usize = 8;
+
 /// Built-in launch presets: (id, display name, executable name). No default arguments are assumed.
 pub const PRESETS: &[(&str, &str, &str)] = &[
     ("claude-code", "Claude Code", "claude"),
@@ -36,11 +49,26 @@ pub struct AgentDef {
     pub executable: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub role: Option<Role>,
+    /// Exit codes that count as success for a workflow step besides the default. Empty means `[0]`.
+    /// Kept sorted, without duplicates, and never exactly `[0]` (see [`AgentStore::save_custom`]).
+    ///
+    /// [`AgentStore::save_custom`]: super::AgentStore::save_custom
+    pub success_exit_codes: Vec<u32>,
 }
 
 impl AgentDef {
     pub fn capabilities(&self) -> &'static [AgentCapability] {
         &[AgentCapability::PtyLaunch]
+    }
+
+    /// Exit codes that mean a workflow step succeeded (ADR 0032 §7).
+    pub fn success_codes(&self) -> Vec<u32> {
+        if self.success_exit_codes.is_empty() {
+            vec![0]
+        } else {
+            self.success_exit_codes.clone()
+        }
     }
 
     pub fn preset(id: &str) -> Option<Self> {
@@ -54,6 +82,8 @@ impl AgentDef {
                 executable: (*exe).into(),
                 args: vec![],
                 env: vec![],
+                role: None,
+                success_exit_codes: vec![],
             })
     }
 }
@@ -66,13 +96,19 @@ pub struct EnvVar {
 
 /// A user-defined CLI agent. Environment values are stored unencrypted, so secret-looking names
 /// are rejected (secrets belong in the Keychain; ADR 0004).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomAgent {
     pub id: String,
     pub name: String,
     pub executable: String,
     pub args: Vec<String>,
     pub env: Vec<EnvVar>,
+    /// Security Suite role (ADR 0032). Absent in agents saved before it existed.
+    #[serde(default)]
+    pub role: Option<Role>,
+    /// Exit codes that count as success for a workflow step; empty means `[0]` (ADR 0032 §7).
+    #[serde(default)]
+    pub success_exit_codes: Vec<u32>,
 }
 
 impl From<&CustomAgent> for AgentDef {
@@ -88,6 +124,8 @@ impl From<&CustomAgent> for AgentDef {
                 .iter()
                 .map(|e| (e.name.clone(), e.value.clone()))
                 .collect(),
+            role: c.role,
+            success_exit_codes: c.success_exit_codes.clone(),
         }
     }
 }
@@ -154,7 +192,26 @@ pub fn validate_custom(c: &CustomAgent) -> Result<(), AgentError> {
             return bad(&format!("The value of '{}' looks like a token, key or password. Naurix does not store credentials; set it in your shell profile instead.", e.name));
         }
     }
+    let codes = &c.success_exit_codes;
+    if codes.len() > MAX_SUCCESS_CODES || codes.iter().any(|&n| n > 255) {
+        return bad(&format!(
+            "At most {MAX_SUCCESS_CODES} success exit codes, each from 0 to 255."
+        ));
+    }
+    if (1..codes.len()).any(|i| codes[..i].contains(&codes[i])) {
+        return bad("Each success exit code may be listed once.");
+    }
     Ok(())
+}
+
+/// Sorted, and empty when it says only the default `[0]`, so an agent that never changed its codes keeps
+/// its launch fingerprint (and its approvals).
+pub fn normalize_success_codes(codes: &mut Vec<u32>) {
+    codes.sort_unstable();
+    codes.dedup();
+    if codes.as_slice() == [0] {
+        codes.clear();
+    }
 }
 
 /// The approval action for launching `def` with `program` in a workspace (ADR 0027). Everything in
@@ -180,6 +237,12 @@ pub fn launch_action(def: &AgentDef, program: &Path, workspace_id: &str) -> Acti
         parts.push(k);
         parts.push(v);
     }
+    // Only when not the default, so agents without custom codes keep their earlier fingerprint.
+    let codes = join_codes(&def.success_exit_codes);
+    let exit_part = format!("success-exit:{codes}");
+    if !def.success_exit_codes.is_empty() {
+        parts.push(&exit_part);
+    }
     let command = std::iter::once(program.to_string())
         .chain(def.args.iter().cloned())
         .map(|a| quote_for_display(&a))
@@ -195,6 +258,11 @@ pub fn launch_action(def: &AgentDef, program: &Path, workspace_id: &str) -> Acti
             .collect::<Vec<_>>()
             .join(", ");
         format!("{command}\nExtra environment: {env}")
+    };
+    let display = if def.success_exit_codes.is_empty() {
+        display
+    } else {
+        format!("{display}\nIn a workflow, exit codes {codes} count as success.")
     };
     let scopes = match def.kind {
         AgentKind::Preset => vec![Scope::Once, Scope::Workspace, Scope::App],
@@ -222,6 +290,14 @@ pub struct LaunchPlan {
 
 fn is_exec(p: &Path) -> bool {
     crate::platform::is_executable_file(p)
+}
+
+fn join_codes(codes: &[u32]) -> String {
+    codes
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn quote_for_display(s: &str) -> String {
@@ -296,6 +372,7 @@ mod tests {
                 name: "AIDER_MODE".into(),
                 value: "fast".into(),
             }],
+            ..Default::default()
         };
         f(&mut c);
         c
@@ -324,6 +401,59 @@ mod tests {
     fn accepts_a_reasonable_custom_agent() {
         assert!(validate_custom(&custom(|_| {})).is_ok());
         assert!(validate_custom(&custom(|c| c.executable = "/opt/tools/my-agent".into())).is_ok());
+    }
+
+    #[test]
+    fn success_exit_codes_are_validated_and_normalized() {
+        for bad in [vec![256], vec![1, 1], (0..9).collect::<Vec<u32>>()] {
+            let c = custom(|c| c.success_exit_codes = bad.clone());
+            assert!(validate_custom(&c).is_err(), "{bad:?}");
+        }
+        assert!(validate_custom(&custom(|c| c.success_exit_codes = vec![0, 1, 255])).is_ok());
+        let norm = |mut v: Vec<u32>| {
+            normalize_success_codes(&mut v);
+            v
+        };
+        assert_eq!(norm(vec![1, 0]), vec![0, 1]);
+        assert_eq!(
+            norm(vec![0]),
+            Vec::<u32>::new(),
+            "the default is stored as empty"
+        );
+        let def = AgentDef::from(&custom(|_| {}));
+        assert_eq!(def.success_codes(), vec![0]);
+    }
+
+    #[test]
+    fn default_exit_codes_keep_the_old_fingerprint_and_custom_ones_change_it() {
+        let program = Path::new("/usr/bin/aider");
+        let def = AgentDef::from(&custom(|_| {}));
+        // The parts exactly as they were before success exit codes existed (ADR 0027 §3).
+        let before = crate::approval::fingerprint(
+            ActionClass::LaunchAgent,
+            &[
+                "custom-1",
+                "/usr/bin/aider",
+                "args:2",
+                "--model",
+                "x y",
+                "env:1",
+                "AIDER_MODE",
+                "fast",
+            ],
+        );
+        assert_eq!(launch_action(&def, program, "w").fingerprint, before);
+
+        let with = AgentDef::from(&custom(|c| c.success_exit_codes = vec![0, 1]));
+        let a = launch_action(&with, program, "w");
+        assert_ne!(a.fingerprint, before);
+        assert!(a.display.contains("exit codes 0, 1 count as success"));
+        let role_only = AgentDef::from(&custom(|c| c.role = Some(Role::Red)));
+        assert_eq!(
+            launch_action(&role_only, program, "w").fingerprint,
+            before,
+            "a role is a label and does not change what runs"
+        );
     }
 
     #[test]

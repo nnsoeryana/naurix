@@ -7,7 +7,7 @@ use crate::mcp::{DataDir, SharedSecrets};
 use crate::terminal::{start_session, ExitPayload, SharedTerminals};
 use naurix_core::agents::{
     adapter, adapter_for, launch_action, plan_launch, search_dirs, AgentCapability, AgentDef,
-    AgentKind, AgentStore, CapabilityInfo, CustomAgent, Feature,
+    AgentKind, AgentStore, CapabilityInfo, CustomAgent, Feature, Role,
 };
 use naurix_core::approval::{ApprovalGate, ApprovalRequest, Verdict};
 use naurix_core::git::worktree::{self, CreatePlan, WorktreeStore};
@@ -56,6 +56,10 @@ pub struct AgentDto {
     command: Option<String>,
     capabilities: Vec<AgentCapability>,
     adapter: Option<AdapterDto>,
+    /// Security Suite role (ADR 0032); custom agents only.
+    role: Option<Role>,
+    /// Exit codes that count as success for a workflow step (always at least one).
+    success_exit_codes: Vec<u32>,
 }
 
 pub(crate) fn dirs() -> Vec<PathBuf> {
@@ -112,6 +116,8 @@ fn describe(
             notice: a.notice,
             verified_with: a.verified_with,
         }),
+        role: def.role,
+        success_exit_codes: def.success_codes(),
     })
 }
 
@@ -162,6 +168,10 @@ pub struct CustomInput {
     executable: String,
     args: Vec<String>,
     env: Vec<EnvInput>,
+    #[serde(default)]
+    role: Option<Role>,
+    #[serde(default)]
+    success_exit_codes: Vec<u32>,
 }
 
 #[tauri::command]
@@ -183,6 +193,8 @@ pub async fn agent_custom_save(
                 value: e.value,
             })
             .collect(),
+        role: agent.role,
+        success_exit_codes: agent.success_exit_codes,
     };
     AgentStore::new(&db).save_custom(c).map_err(err)?;
     list(&db, &gate)

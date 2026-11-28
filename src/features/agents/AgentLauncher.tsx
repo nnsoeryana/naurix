@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../state/store";
 import { approvalApi, scopeLabel, type ApprovalRequest, type ApprovalScope } from "../approvals/api";
 import { worktreeApi, type WorktreeSupport } from "../worktrees/api";
-import { agentApi, type AgentInfo, type CustomAgentInput } from "./api";
+import { agentApi, parseExitCodes, type AgentInfo, type CustomAgentInput, type Role } from "./api";
 import { extrasAreOnceOnly, ordered, requestTitle, splitRequests } from "./requests";
 import { Capabilities } from "./Capabilities";
 
 /** `requests` is set when the backend asked for approval: the review then shows ITS text, not anything the UI built. */
 type Mode = { kind: "list" } | { kind: "review"; id: string; requests?: ApprovalRequest[] } | { kind: "edit"; draft: Draft };
-type Draft = { id?: string; name: string; executable: string; args: string; env: string };
+type Draft = { id?: string; name: string; executable: string; args: string; env: string; role: Role | null; exitCodes: string };
 
 const field = "w-full rounded border border-line bg-midnight px-2 py-1 text-sm outline-none focus:border-purple";
 const btn = "rounded px-3 py-1 text-sm";
@@ -79,6 +79,7 @@ function Launcher() {
                     <div className="flex items-center gap-2 text-sm">
                       <span>{a.name}</span>
                       {a.kind === "custom" && <span className="rounded bg-raised px-1 text-[10px] text-muted">custom</span>}
+                      {a.role && <span className="rounded bg-raised px-1 text-[10px] text-muted">{a.role} team</span>}
                       {a.adapter?.notice && <span className="text-warning" title={a.adapter.notice}>⚠</span>}
                     </div>
                     <div className="truncate text-[11px] text-faint" title={a.resolvedPath ?? undefined}>
@@ -118,7 +119,7 @@ function Launcher() {
             </div>
             {error && <p className="mt-2 text-xs text-danger">{error}</p>}
             <div className="mt-3 flex justify-between">
-              <button className={`${btn} bg-raised hover:bg-line`} onClick={() => setMode({ kind: "edit", draft: { name: "", executable: "", args: "", env: "" } })}>Add custom agent…</button>
+              <button className={`${btn} bg-raised hover:bg-line`} onClick={() => setMode({ kind: "edit", draft: { name: "", executable: "", args: "", env: "", role: null, exitCodes: "0" } })}>Add custom agent…</button>
               <button className={`${btn} bg-raised hover:bg-line`} onClick={close}>Close</button>
             </div>
           </>
@@ -220,6 +221,7 @@ function Review({ agent, requests, rootPath, back, start, launch, run, error }: 
 
 function Edit({ draft: initial, back, run, error }: { draft: Draft; back: () => void; run: (p: Promise<AgentInfo[]>, then?: () => void) => Promise<void>; error: string | null }) {
   const [d, setD] = useState(initial);
+  const codes = parseExitCodes(d.exitCodes);
   const input: CustomAgentInput = {
     id: d.id,
     name: d.name,
@@ -229,6 +231,8 @@ function Edit({ draft: initial, back, run, error }: { draft: Draft; back: () => 
       const i = l.indexOf("=");
       return i < 0 ? { name: l, value: "" } : { name: l.slice(0, i).trim(), value: l.slice(i + 1) };
     }),
+    role: d.role,
+    successExitCodes: codes ?? [],
   };
   return (
     <>
@@ -241,15 +245,40 @@ function Edit({ draft: initial, back, run, error }: { draft: Draft; back: () => 
       <textarea className={`${field} mb-2 h-20 font-mono`} value={d.args} onChange={(e) => setD({ ...d, args: e.target.value })} />
       <label className="mb-1 block text-xs text-faint">Environment (NAME=value per line). Naurix stores no credentials: tokens, keys and passwords are refused. Set those in your shell profile.</label>
       <textarea className={`${field} mb-2 h-16 font-mono`} value={d.env} onChange={(e) => setD({ ...d, env: e.target.value })} />
+      <div className="mb-2 flex gap-3">
+        <div className="flex-1">
+          <label className="mb-1 block text-xs text-faint">Security role (a label only)</label>
+          <select className={field} value={d.role ?? ""} onChange={(e) => setD({ ...d, role: (e.target.value || null) as Role | null })}>
+            <option value="">None</option>
+            <option value="red">Red team</option>
+            <option value="blue">Blue team</option>
+            <option value="purple">Purple team</option>
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="mb-1 block text-xs text-faint">Success exit codes in workflows</label>
+          <input className={`${field} font-mono`} value={d.exitCodes} placeholder="0" onChange={(e) => setD({ ...d, exitCodes: e.target.value })} />
+        </div>
+      </div>
+      <p className="mb-2 text-xs text-faint">Scanners often exit with 1 when they find issues. Listing it lets the next workflow step start. Changing the codes asks for approval again.</p>
+      {codes === null && <p className="mb-2 text-xs text-danger">Exit codes are whole numbers from 0 to 255, separated by commas.</p>}
       {error && <p className="mb-2 text-xs text-danger">{error}</p>}
       <div className="flex justify-between">
         <button className={`${btn} bg-raised hover:bg-line`} onClick={back}>Cancel</button>
-        <button className={`${btn} btn-primary`} onClick={() => void run(agentApi.saveCustom(input), back)}>Save</button>
+        <button className={`${btn} btn-primary`} disabled={codes === null} onClick={() => void run(agentApi.saveCustom(input), back)}>Save</button>
       </div>
     </>
   );
 }
 
 function toDraft(a: AgentInfo): Draft {
-  return { id: a.id, name: a.name, executable: a.executable, args: a.args.join("\n"), env: a.env.map((e) => `${e.name}=${e.value}`).join("\n") };
+  return {
+    id: a.id,
+    name: a.name,
+    executable: a.executable,
+    args: a.args.join("\n"),
+    env: a.env.map((e) => `${e.name}=${e.value}`).join("\n"),
+    role: a.role,
+    exitCodes: a.successExitCodes.join(", "),
+  };
 }
