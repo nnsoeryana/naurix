@@ -16,6 +16,7 @@ export function buildActions(): Action[] {
     { id: "skills", title: "Agent skills", run: () => s.setView("skills") },
     { id: "settings", title: "Settings", shortcut: sc("settings"), run: () => s.setView("settings") },
     { id: "git", title: "Git status", run: () => s.setView("git") },
+    { id: "security", title: "Security reports", run: () => s.setView("security") },
     { id: "gitRefresh", title: "Refresh Git status", run: () => void s.refreshGit() },
     { id: "font", title: "Terminal font…", run: s.setFontFamilyWithPrompt },
     { id: "fontSize", title: "Terminal font size…", run: s.setFontSizeWithPrompt },

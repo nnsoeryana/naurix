@@ -8,6 +8,7 @@ mod git;
 mod lifecycle;
 mod mcp;
 mod memory;
+mod security;
 mod settings;
 mod skills;
 mod terminal;
@@ -215,6 +216,8 @@ pub fn run() {
             memory::memory_delete,
             memory::memory_delete_all,
             memory::memory_export,
+            security::security_open_report,
+            security::security_compare,
             workflow::workflow_list,
             workflow::workflow_save,
             workflow::workflow_delete,

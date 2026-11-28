@@ -1,5 +1,5 @@
 # ADR 0032 — Security Suite: reviewed reports, never stored findings
-**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-28, see the end). **Partly implemented:** the Core report model, the SARIF reader and the comparison (§3–§5), and the exit codes and roles (§7). The bridge and the view (§8) and the offensive approval class (§6) are not built yet.
+**Status:** Proposed (maintainer to accept; the four decisions were answered on 2026-11-28, see the end). **Implemented except §6:** the Core report model, the SARIF reader and the comparison (§3–§5), the exit codes and roles (§7), and the bridge and the view (§8). The offensive approval class (§6) is not built; it needs its own ADR first.
 
 ## Context
 The maintainer asked for a **Security Suite** inside Naurix with three roles: a Red Team (offensive assessment), a Blue Team (defensive analysis and remediation) and a Purple Team (validating findings, correlating them, and catching security regressions). It must reuse what Naurix has, not add a runtime or platform of its own.
@@ -118,8 +118,22 @@ Implemented in `crates/core/src/security` (`mod.rs`, `finding.rs`, `sarif.rs`, `
 - old stored agents loading without the fields;
 - a step exiting 1 with `[0, 1]` succeeding, while another agent's exit 3 still fails.
 
+**P7–P8 (2026-11-28):**
+- **Bridge:** `src-tauri/src/security.rs` has two commands, `security_open_report` and `security_compare`. Each opens the native file dialog itself, starting in the workspace folder and filtered to `.sarif`/`.json`. The webview sends only a workspace id. A unit test pins the JSON shapes the view reads.
+- **View:** `src/features/security/` has `api.ts`, `model.ts` (counting, filtering and sorting, with Vitest tests) and `SecurityView.tsx`.
+  - Its entry points are a **Security** button in the sidebar and **Security reports** in the command palette.
+  - The view lists the custom agents in each role, which it reads through `agent_list` and which starts nothing.
+  - It shows a report with severity filters and a text filter, or a comparison in three groups.
+  - Report text is rendered as plain text.
+  - Severity is written in normal text, with a coloured dot as a second cue (the ADR 0030 contrast lesson).
+  - At most 1,000 rows are drawn.
+  - What is shown lives in component state only, so it is gone on leaving the view or switching project.
+- **Docs:** the user manual gains section 12.
+- **Dependencies and bundle:** no new dependency. The main chunk is 915.09 kB (253.13 kB gzipped) after this change; it was not measured before, so the growth is unknown.
+
 **Not verified:**
 1. No real scanner's SARIF was used. The fixtures are hand-written to the SARIF 2.1.0 shape, not captured from a tool with a recorded version (ADR 0014 evidence rule).
 2. The `security-severity` convention was not checked against real scanner output.
-3. There is no bridge or view yet, so nothing is reachable from the app.
+3. **The app was not run.** The view, the native file dialogs and the sidebar entry were not looked at or clicked, and a script cannot answer native dialogs anyway (ADR 0031's export has the same gap). Layout, wording and the light-theme contrast of the severity dots need a visual pass on macOS.
 4. Windows-style paths are handled lexically and tested on macOS only. Linux and Windows are left to CI.
+5. `docs/USER_MANUAL.pdf` was not regenerated, so it lacks section 12.

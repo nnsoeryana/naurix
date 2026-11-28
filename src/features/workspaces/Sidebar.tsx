@@ -1,4 +1,4 @@
-import { IconBolt, IconFlow, IconFolder, IconNote, IconGear, IconGit, IconHome, IconPencil, IconPlug, IconPlus, IconClose } from "../../components/icons";
+import { IconBolt, IconFlow, IconFolder, IconNote, IconGear, IconGit, IconHome, IconPencil, IconPlug, IconPlus, IconClose, IconShield } from "../../components/icons";
 import { IS_MAC, SHORTCUTS } from "../../shortcuts";
 import { useStore } from "../../state/store";
 import markUrl from "../../assets/naurix-mark.svg";
@@ -75,6 +75,10 @@ export function Sidebar() {
 
         <button className={`${row} ${view === "memory" ? "bg-purple/20 text-cloud" : "text-muted hover:bg-raised/60"}`} onClick={() => setView("memory")}>
           <IconNote className={view === "memory" ? "text-purple" : ""} /> Memory
+        </button>
+
+        <button className={`${row} ${view === "security" ? "bg-purple/20 text-cloud" : "text-muted hover:bg-raised/60"}`} onClick={() => setView("security")}>
+          <IconShield className={view === "security" ? "text-purple" : ""} /> Security
         </button>
 
         <button className={`${row} ${view === "git" ? "bg-purple/20 text-cloud" : "text-muted hover:bg-raised/60"}`} onClick={() => setView("git")}>

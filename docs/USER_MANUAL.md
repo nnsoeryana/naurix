@@ -22,14 +22,15 @@ Panduan ini menjelaskan cara memakai Naurix dari awal. Teks di antara tanda kuti
 9. [Approval dan keamanan](#9-approval-dan-keamanan)
 10. [Workflows](#10-workflows)
 11. [Memory (catatan proyek)](#11-memory-catatan-proyek)
-12. [MCP Integrations](#12-mcp-integrations)
-13. [Agent Skills](#13-agent-skills)
-14. [Git](#14-git)
-15. [Pengaturan](#15-pengaturan)
-16. [Pintasan keyboard](#16-pintasan-keyboard)
-17. [Data, privasi, dan reset](#17-data-privasi-dan-reset)
-18. [Pemecahan masalah](#18-pemecahan-masalah)
-19. [Pertanyaan umum](#19-pertanyaan-umum)
+12. [Security (laporan keamanan)](#12-security-laporan-keamanan)
+13. [MCP Integrations](#13-mcp-integrations)
+14. [Agent Skills](#14-agent-skills)
+15. [Git](#15-git)
+16. [Pengaturan](#16-pengaturan)
+17. [Pintasan keyboard](#17-pintasan-keyboard)
+18. [Data, privasi, dan reset](#18-data-privasi-dan-reset)
+19. [Pemecahan masalah](#19-pemecahan-masalah)
+20. [Pertanyaan umum](#20-pertanyaan-umum)
 
 ---
 
@@ -141,7 +142,7 @@ Kodenya ada tetapi **belum divalidasi di perangkat nyata**, jadi anggap eksperim
 
 ### Menutup dan keluar
 - Mengetik `exit` (kode 0) menutup pane shell. Bila keluar dengan kode bukan nol atau dihentikan paksa, pane tetap terbuka dengan tombol **Restart** dan **Close** agar kamu bisa membaca apa yang terjadi. Pane agent selalu tetap terbuka.
-- Bila pane masih menjalankan perintah, Naurix meminta konfirmasi sebelum menutup (bisa dimatikan, lihat bagian 15).
+- Bila pane masih menjalankan perintah, Naurix meminta konfirmasi sebelum menutup (bisa dimatikan, lihat bagian 16).
 - **Menutup jendela (macOS)** hanya menyembunyikan jendela, sesi tetap berjalan, dan klik ikon Dock membukanya lagi. **⌘Q** benar-benar keluar dan menghentikan semua proses dengan sopan (SIGHUP, SIGTERM, lalu SIGKILL bila perlu). Bila masih ada pekerjaan berjalan, Naurix bertanya dulu.
 - **Memuat ulang UI** tidak menghentikan sesi. Setelah reload, tiap sesi kembali sebagai satu tab (susunan split tidak dipulihkan) dan isinya diputar ulang dari buffer di memori. ⚠️ Pemeriksaan manual di macOS untuk ini masih menunggu, dan agent berbasis layar penuh (TUI) bisa tergambar kurang sempurna setelah replay. Naurix mengubah ukuran terminal sedikit agar TUI menggambar ulang.
 
@@ -176,6 +177,7 @@ Klik **Add custom agent…** lalu isi:
 - **Executable**: nama perintah (misalnya `aider`) atau path absolut
 - **Argumen**: satu per baris, tanpa kutipan shell
 - **Environment** (opsional): baris `NAMA=nilai`
+- **Security role** dan **Success exit codes in workflows** (opsional): lihat bagian 12
 
 Nilai environment disimpan tanpa enkripsi, jadi nama yang tampak seperti rahasia (`…KEY`, `…TOKEN`, `…SECRET`, `…PASSWORD`) **ditolak**. Simpan API key di profil shell-mu. Agent kustom **selalu ditinjau** setiap peluncuran, kecuali kamu menyetujuinya untuk workspace (bagian 9).
 
@@ -344,7 +346,34 @@ Bila kamu mematikannya kembali, catatan **tetap disimpan tetapi disembunyikan**.
 
 ---
 
-## 12. MCP Integrations
+## 12. Security (laporan keamanan)
+
+Buka **Security** di sidebar (atau **⌘K → Security reports**). Di sini kamu membaca laporan **SARIF** yang ditulis scanner atau agent, dan membandingkan dua laporan untuk melihat temuan yang baru. Red, Blue, dan Purple team bukan program tersendiri. Ketiganya adalah **peran** yang kamu berikan pada agent kustom, sedangkan instruksinya dipasang sebagai skill (bagian 14).
+
+### Menyiapkan tim
+- Di **Add custom agent…** (bagian 6), pilih **Security role**: Red, Blue, atau Purple. Peran hanya label dan tidak mengubah apa yang dijalankan.
+- Banyak scanner keluar dengan kode **1** bila menemukan masalah. Isi **Success exit codes in workflows** dengan `0, 1` supaya langkah workflow berikutnya tetap berjalan. Mengubah kode ini meminta approval ulang.
+- Jalankan scanner sebagai agent kustom atau langkah workflow, dan arahkan output SARIF-nya ke file di proyek.
+
+### Membuka laporan
+**Open report…** membuka dialog pilih file di folder proyek. Laporan dianggap **tidak tepercaya**:
+- Maksimal 20 MiB dan 5.000 temuan. Sisanya dihitung, tidak ditampilkan.
+- Path di luar proyek tidak ditampilkan. Temuannya tetap muncul, tanpa lokasi.
+- Pesan yang tampak berisi secret disembunyikan.
+- Potongan kode (snippet) tidak pernah dibaca.
+
+Saring temuan menurut tingkat keparahan (Critical, High, Medium, Low, Info) atau menurut teks.
+
+### Membandingkan (regresi)
+**Compare two reports…** meminta dua file: **baseline** (yang lebih lama), lalu laporan **terbaru**. Hasilnya dibagi tiga: **New**, **Still present**, dan **No longer reported**. "No longer reported" hanya berarti scanner berhenti melaporkannya; itu **bukan bukti** masalahnya sudah diperbaiki.
+
+### Yang perlu diketahui
+- **Tidak ada yang disimpan.** Laporan hilang saat kamu meninggalkan tampilan ini atau berganti proyek. File SARIF-nya sendiri tetap di proyekmu.
+- Naurix tidak menjalankan scanner dari tampilan ini dan tidak mengirim apa pun ke agent.
+
+---
+
+## 13. MCP Integrations
 
 Buka **MCP** di sidebar (atau **⌘K → MCP integrations**). MCP adalah cara agent memakai tool eksternal. Naurix menyimpan definisi server sekali di satu tempat lalu menyinkronkannya ke konfigurasi agent.
 
@@ -360,7 +389,7 @@ Saat ini sinkronisasi bekerja untuk **Claude Code** (`.mcp.json` proyek) dan **O
 
 ---
 
-## 13. Agent Skills
+## 14. Agent Skills
 
 Buka **Skills** di sidebar. Skill adalah folder berisi file `SKILL.md`.
 
@@ -374,7 +403,7 @@ Buka **Skills** di sidebar. Skill adalah folder berisi file `SKILL.md`.
 
 ---
 
-## 14. Git
+## 15. Git
 
 Buka **Git** di sidebar, atau klik branch di status bar. Tampilan ini **hanya-baca**.
 
@@ -388,7 +417,7 @@ Buka **Git** di sidebar, atau klik branch di status bar. Tampilan ini **hanya-ba
 
 ---
 
-## 15. Pengaturan
+## 16. Pengaturan
 
 Tekan **⌘,** atau pilih **Settings**. Perubahan divalidasi backend, berlaku seketika, dan tersimpan.
 
@@ -407,7 +436,7 @@ Tips performa: bila menjalankan banyak terminal, turunkan scrollback.
 
 ---
 
-## 16. Pintasan keyboard
+## 17. Pintasan keyboard
 
 | Aksi | macOS | Linux dan Windows |
 |---|---|---|
@@ -432,7 +461,7 @@ Open project folder…, New terminal tab, Launch AI agent…, Split pane right /
 
 ---
 
-## 17. Data, privasi, dan reset
+## 18. Data, privasi, dan reset
 
 **Yang disimpan** (metadata saja): nama dan path workspace, judul, status, dan waktu sesi, pengaturan, agent kustom dan executable yang disetujui, definisi MCP dan skill, izin persetujuan, worktree yang dibuat Naurix, workflow dan riwayat run, dan catatan Memory yang kamu tulis.
 
@@ -455,7 +484,7 @@ Izin akses folder macOS: macOS bisa menanyakan akses ke Downloads, Documents, at
 
 ---
 
-## 18. Pemecahan masalah
+## 19. Pemecahan masalah
 
 | Masalah | Solusi |
 |---|---|
@@ -475,7 +504,7 @@ Izin akses folder macOS: macOS bisa menanyakan akses ke Downloads, Documents, at
 
 ---
 
-## 19. Pertanyaan umum
+## 20. Pertanyaan umum
 
 **Apakah Naurix mengirim kode atau prompt-ku ke server?** Tidak. Naurix tidak punya telemetri dan tidak berbicara ke layanan AI. Agent yang kamu jalankan sendiri yang berkomunikasi dengan penyedianya, di luar kendali Naurix.
 

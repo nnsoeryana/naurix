@@ -36,7 +36,7 @@ let gitInflight = false;
 let gitPending = false;
 const uid = (prefix: string) => `${prefix}${++counter}`;
 
-export type View = "home" | "terminal" | "mcp" | "skills" | "git" | "workflows" | "memory" | "settings";
+export type View = "home" | "terminal" | "mcp" | "skills" | "git" | "workflows" | "memory" | "security" | "settings";
 
 type State = {
   loaded: boolean;
@@ -365,7 +365,7 @@ export const useStore = create<State>()((set, get) => {
     },
 
     selectWorkspace: (id) => {
-      set((st) => ({ activeWorkspaceId: id, view: ["mcp", "skills", "git", "workflows", "memory", "settings"].includes(st.view) ? st.view : (st.spaces[id]?.tabs.length ?? 0) > 0 ? "terminal" : "home" }));
+      set((st) => ({ activeWorkspaceId: id, view: ["mcp", "skills", "git", "workflows", "memory", "security", "settings"].includes(st.view) ? st.view : (st.spaces[id]?.tabs.length ?? 0) > 0 ? "terminal" : "home" }));
       workspaceApi.open(id).catch(() => {});
       void get().refreshGit();
       // Refresh availability (the folder may have been moved or deleted).
