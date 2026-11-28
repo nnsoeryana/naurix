@@ -10,6 +10,7 @@ pub mod memory;
 pub mod persistence;
 pub mod platform;
 pub mod pty;
+pub mod security;
 pub mod session;
 pub mod settings;
 pub mod signals;
