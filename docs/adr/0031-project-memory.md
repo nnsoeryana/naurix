@@ -1,5 +1,5 @@
 # ADR 0031 — Opt-in project memory (orchestration stage 9)
-**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 9 of ADR 0022 (§3) and MEM-001 to MEM-007. MEM-008 (delivery to agents) is implemented in its smallest user-driven form (§6); writing to agents' own memory files is deliberately not part of this stage.
+**Status:** Accepted (2026-11-28, maintainer; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 9 of ADR 0022 (§3) and MEM-001 to MEM-007. MEM-008 (delivery to agents) is implemented in its smallest user-driven form (§6); writing to agents' own memory files is deliberately not part of this stage.
 
 ## Context
 ADR 0022 §3 decided the shape of memory: SQLite with FTS5, explicit and opt-in per workspace, never automatic, user-controlled, exportable, never committed to Git, never delivered silently. This ADR fixes the details.
@@ -71,4 +71,4 @@ Differences from, or additions to, the design above:
 4. The scanner is heuristic: it was tested on known token shapes and a set of ordinary notes, not on a large corpus, so both false refusals and misses are possible.
 5. Importing notes is not implemented (not requested). Windows and Linux were not run.
 
-**Still pending the maintainer:** marking this ADR Accepted, after which the PRD records MEM-001 to MEM-008 as implemented (MEM-008 in the user-driven form only) and `AGENTS.md` lists stage 9 as done.
+**Accepted 2026-11-28.** Done on acceptance: the PRD records MEM-001 to MEM-008 as implemented (MEM-008 in the user-driven form only) and `AGENTS.md` lists stage 9 as done.

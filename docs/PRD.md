@@ -171,7 +171,7 @@ Settings sections: General, Terminal, AI Agents, MCP Integrations, Agent Skills,
 
 ### 5.9 Orchestration workspace (post-MVP, ADR 0022)
 
-Delivered in the stages listed in ADR 0022, each leaving the app runnable. Implemented so far (stages 1–7, ADR 0023–0029): SES-001–004, ORCH-001–004, ORCH-006, ORCH-007 (Claude Code only), APR-001–003 and GIT-006; still to do: ORCH-005, WF-001 and MEM-001–008. Visual and real-agent checks are listed as not verified in each ADR's implementation log. None of it may be required to use the terminal.
+Delivered in the stages listed in ADR 0022, each leaving the app runnable. Implemented (stages 1–9, ADR 0023–0031): SES-001–004, ORCH-001–007 (ORCH-007 Claude Code only), APR-001–003, GIT-006, WF-001 and MEM-001–008 (MEM-008 in the user-driven insert form only, ADR 0031 §6). Visual and real-agent checks are listed as not verified in each ADR's implementation log. None of it may be required to use the terminal.
 
 | ID | Priority | Requirement | Acceptance criteria |
 |---|---|---|---|
@@ -187,7 +187,7 @@ Delivered in the stages listed in ADR 0022, each leaving the app runnable. Imple
 | ORCH-006 | P1 | Opt-in worktree isolation | A run may request a Git worktree; creation needs approval at "once" scope and is never silent (see GIT-006) |
 | ORCH-007 | P1 | Verified status signals | Working, waiting for approval, waiting for input and turn finished are shown only from a signal the agent itself reported through a Verified adapter capability, opt-in per agent, never from output heuristics; hooks never read prompts, answers or tool input; nothing is written to the agent's own configuration. Claude Code only so far (ADR 0029) |
 | APR-001 | P1 | Central approval gate | Launching an agent, automated input, run or workflow step, worktree creation and agent-config writes all pass one gate that records and can revoke decisions |
-| APR-002 | P1 | Scoped approvals | Scopes: once, workspace and app today (ADR 0027); session and run/workflow run arrive with stage 8. Bound to a fingerprint of the reviewed target; a changed target needs a new approval. Git mutations and agent-config writes are "once" only. No "approve everything" scope |
+| APR-002 | P1 | Scoped approvals | Scopes: once, workspace and app (ADR 0027), and run, created only by Core for an approved workflow run and ended with it (ADR 0030); a session scope is not used. Bound to a fingerprint of the reviewed target; a changed target needs a new approval. Git mutations and agent-config writes are "once" only. No "approve everything" scope |
 | APR-003 | P1 | Approval visibility | Approvals are listed in Settings (Security), revocable, cleared with the workspace; stored as metadata only |
 | WF-001 | P2 | Reusable workflows | A workflow is a saved set of tasks and dependencies, runnable many times; every step goes through the approval gate |
 | MEM-001 | P2 | Opt-in per workspace | Memory is off until the user enables it for that workspace |
@@ -198,6 +198,19 @@ Delivered in the stages listed in ADR 0022, each leaving the app runnable. Imple
 | MEM-006 | P2 | Export | Markdown and JSON, to a location the user chooses; a warning if that location is inside a Git repository |
 | MEM-007 | P2 | Never committed automatically | Naurix never writes memory or exports into a repository and never runs `git add`/`git commit` for them |
 | MEM-008 | P2 | Approved delivery to agents | Memory reaches an agent only through an approved, reversible mechanism (dry-run, backup, rollback); never injected silently |
+
+### 5.10 Security Suite (ADR 0032)
+
+Red, Blue and Purple are roles delivered as skills and custom agents; Naurix itself only reads and compares security reports the user opens. Optional: none of it is needed to use terminals or agents. Implemented so far: SEC-001 to SEC-003 in Core only (no view yet).
+
+| ID | Priority | Requirement | Acceptance criteria |
+|---|---|---|---|
+| SEC-001 | P2 | Read SARIF reports as untrusted input | Only SARIF 2.1.0; at most 20 MiB and 5,000 results; text cleaned and length-limited; paths made relative to the workspace or dropped, checked lexically; errors never quote report content |
+| SEC-002 | P2 | Findings are never stored | No finding, message or report path is written to the database, logs or events; a report lives only while the view shows it |
+| SEC-003 | P2 | Regression comparison | Two reports opened together are compared by fingerprint into new, still present and no longer reported; "no longer reported" is never called fixed |
+| SEC-004 | P2 | Report opened by the user | The backend opens the file dialog; the webview never names a path; nothing is read in the background |
+| SEC-005 | P2 | Scanner exit codes | A custom agent may list the exit codes that mean success; the list is part of its launch fingerprint |
+| SEC-006 | P2 | Offensive targets are approved | Network-facing security actions need a once/run approval whose fingerprint covers the exact targets; default policy is the workspace folder and loopback |
 
 ## 6. UX and information architecture
 

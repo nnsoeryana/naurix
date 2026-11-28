@@ -1,5 +1,5 @@
 # ADR 0030 — Reusable workflows and runs (orchestration stage 8)
-**Status:** Proposed (maintainer to accept; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 8 of ADR 0022 (§4.8) and the requirements ORCH-005 and WF-001, and builds the Task/Run model that ADR 0027 §6 moved here. It adds one approval class (`run_workflow`) and one scope (`run`), which the gate reserved a column for (`approvals.scope_ref`).
+**Status:** Accepted (2026-11-28, maintainer; the three decisions were answered on 2026-11-23, see the end). **Implemented; see the implementation log at the end for what is not yet verified.** Implements stage 8 of ADR 0022 (§4.8) and the requirements ORCH-005 and WF-001, and builds the Task/Run model that ADR 0027 §6 moved here. It adds one approval class (`run_workflow`) and one scope (`run`), which the gate reserved a column for (`approvals.scope_ref`).
 
 ## Context
 Stages 1–7 give Naurix agent sessions that survive the view, one approval gate, an agent limit, opt-in worktrees and opt-in status signals. What is missing is the "reusable workflows" principle of ADR 0022: a saved set of agent runs and dependencies that can be started many times.
@@ -94,4 +94,4 @@ Differences from, or additions to, the design above:
 4. Several runs at once in one workspace, the 24-step limit in the UI, and a run whose workspace folder disappears were not exercised in the app.
 5. Windows and Linux were not run.
 
-**Still pending the maintainer:** marking this ADR Accepted, after which the PRD records ORCH-005 and WF-001 as implemented (and the session/run scope text in APR-002), and `AGENTS.md` lists stage 8 as done.
+**Accepted 2026-11-28.** Done on acceptance: the PRD records ORCH-005 and WF-001 as implemented (and the session/run scope text in APR-002), and `AGENTS.md` lists stage 8 as done.
